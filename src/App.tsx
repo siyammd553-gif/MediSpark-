@@ -1,0 +1,254 @@
+import React, { useState } from 'react';
+import { PageView, Course } from './types';
+import { COURSES_DATA } from './data/mockData';
+import { ThemeProvider } from './context/ThemeContext';
+import { LearningProvider, useLearning } from './context/LearningContext';
+import { Header } from './components/Header';
+import { NavigationDrawer } from './components/NavigationDrawer';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { AuthModal } from './components/AuthModal';
+import { PaymentModal } from './components/PaymentModal';
+import { Footer } from './components/Footer';
+
+// Home Page Subcomponents
+import { HeroSection } from './components/home/HeroSection';
+import { HighlightCards } from './components/home/HighlightCards';
+import { MentorSection } from './components/home/MentorSection';
+import { FeaturedCourses } from './components/home/FeaturedCourses';
+import { MedicalPrepFeatures } from './components/home/MedicalPrepFeatures';
+import { SuccessStats } from './components/home/SuccessStats';
+import { TestimonialsSection } from './components/home/TestimonialsSection';
+import { StudyResourcesSection } from './components/home/StudyResourcesSection';
+import { CtaSection } from './components/home/CtaSection';
+
+// Full Page Views
+import { StudentDashboard } from './components/dashboard/StudentDashboard';
+import { CourseOverviewView } from './components/learning/CourseOverviewView';
+import { ChapterLearningPage } from './components/learning/ChapterLearningPage';
+import { CoursesPage } from './pages/CoursesPage';
+import { MentorsPage } from './pages/MentorsPage';
+import { ExamPracticePage } from './pages/ExamPracticePage';
+import { QnAPage } from './pages/QnAPage';
+import { RankPredictorPage } from './pages/RankPredictorPage';
+import { StudyResourcesPage } from './pages/StudyResourcesPage';
+import { AboutPage } from './pages/AboutPage';
+import { ContactPage } from './pages/ContactPage';
+
+export function AppContent() {
+  const [currentPage, setCurrentPage] = useState<PageView>('dashboard');
+  const [isNavDrawerOpen, setIsNavDrawerOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [selectedCourseForPayment, setSelectedCourseForPayment] = useState<Course | null>(null);
+  const [userRole, setUserRole] = useState<'student' | 'admin' | 'guest'>('student');
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const { enrollInCourse, navigateToCourse } = useLearning();
+
+  // Scroll to top on page navigate
+  const handleNavigate = (page: PageView) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
+  };
+
+  const handleDownloadResource = (title: string) => {
+    triggerToast(`📥 Downloading "${title}" (High-Yield PDF)...`);
+  };
+
+  const handleEnrollCourse = (course: Course) => {
+    if (course.isFree || course.price === 0) {
+      enrollInCourse(course.id);
+      navigateToCourse(course.id);
+      triggerToast(`🎉 Enrolled in ${course.title}! Loading Course Overview...`);
+      setTimeout(() => {
+        handleNavigate('course-overview');
+      }, 500);
+      return;
+    }
+    setSelectedCourseForPayment(course);
+    setIsPaymentModalOpen(true);
+  };
+
+  const handlePaymentSuccess = (course: Course) => {
+    enrollInCourse(course.id);
+    navigateToCourse(course.id);
+    triggerToast(`🎉 Successfully enrolled in ${course.title}!`);
+    setTimeout(() => {
+      handleNavigate('course-overview');
+    }, 1000);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#090909] text-white flex flex-col font-sans selection:bg-[#E50914] selection:text-white relative">
+      {/* Elegant Dark Subtle Radial Pattern Layer */}
+      <div className="bg-pattern" />
+      
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="fixed top-20 right-4 z-50 bg-[#161822] border border-[#E50914]/50 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-top-4 duration-300">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#E50914] animate-ping shrink-0" />
+          <span className="text-xs sm:text-sm font-bold">{toastMessage}</span>
+        </div>
+      )}
+
+      {/* Main Header with Theme Switch */}
+      <Header
+        currentPage={currentPage}
+        onNavigate={handleNavigate}
+        onOpenAuth={() => setIsAuthModalOpen(true)}
+        onOpenNavDrawer={() => setIsNavDrawerOpen(true)}
+      />
+
+      {/* Responsive Navigation Drawer */}
+      <NavigationDrawer
+        isOpen={isNavDrawerOpen}
+        onClose={() => setIsNavDrawerOpen(false)}
+        currentPage={currentPage}
+        onNavigate={handleNavigate}
+        onOpenAuth={() => {
+          setIsNavDrawerOpen(false);
+          setIsAuthModalOpen(true);
+        }}
+        isLoggedIn={true}
+        userStreak={14}
+      />
+
+      {/* Main Content Router */}
+      <main className="flex-1 pb-16 lg:pb-0">
+        {/* Route: Home Page */}
+        {currentPage === 'home' && (
+          <div className="space-y-0">
+            <HeroSection
+              onNavigate={handleNavigate}
+              onOpenAuth={() => setIsAuthModalOpen(true)}
+            />
+            <HighlightCards onNavigate={handleNavigate} />
+            <MentorSection onNavigate={handleNavigate} />
+            <SuccessStats />
+            <TestimonialsSection />
+            <StudyResourcesSection
+              onNavigate={handleNavigate}
+              onDownload={handleDownloadResource}
+            />
+            <CtaSection
+              onNavigate={handleNavigate}
+              onOpenAuth={() => setIsAuthModalOpen(true)}
+            />
+          </div>
+        )}
+
+        {/* Route: Student Dashboard */}
+        {currentPage === 'dashboard' && (
+          <StudentDashboard
+            onNavigate={handleNavigate}
+            onDownloadResource={handleDownloadResource}
+          />
+        )}
+
+        {/* Route: Course Overview Page */}
+        {currentPage === 'course-overview' && (
+          <CourseOverviewView onNavigate={handleNavigate} />
+        )}
+
+        {/* Route: Hierarchical Chapter Learning Page */}
+        {currentPage === 'chapter-learning' && (
+          <ChapterLearningPage onNavigate={handleNavigate} />
+        )}
+
+        {/* Route: All Courses */}
+        {currentPage === 'courses' && (
+          <CoursesPage
+            onNavigate={handleNavigate}
+            onEnroll={handleEnrollCourse}
+          />
+        )}
+
+        {/* Route: Mentors & Faculty */}
+        {currentPage === 'mentors' && (
+          <MentorsPage onNavigate={handleNavigate} />
+        )}
+
+        {/* Route: DGHS Exam Practice & MCQ Simulator */}
+        {currentPage === 'exam' && (
+          <ExamPracticePage onNavigate={handleNavigate} />
+        )}
+
+        {/* Route: Q&A Doubt Clearance & AI Tutor */}
+        {(currentPage === 'qna' || currentPage === 'ai-tutor') && (
+          <QnAPage onNavigate={handleNavigate} />
+        )}
+
+        {/* Route: Rank & College Predictor */}
+        {currentPage === 'rank-predictor' && (
+          <RankPredictorPage onNavigate={handleNavigate} />
+        )}
+
+        {/* Route: Study Resources Vault */}
+        {currentPage === 'resources' && (
+          <StudyResourcesPage
+            onNavigate={handleNavigate}
+            onDownload={handleDownloadResource}
+          />
+        )}
+
+        {/* Route: About MediSpark */}
+        {currentPage === 'about' && (
+          <AboutPage onNavigate={handleNavigate} />
+        )}
+
+        {/* Route: Contact & Helpline */}
+        {currentPage === 'contact' && (
+          <ContactPage />
+        )}
+      </main>
+
+      {/* Global Footer (displayed on all pages) */}
+      <Footer onNavigate={handleNavigate} />
+
+      {/* Mobile Bottom Bar for quick navigation on phones */}
+      <MobileBottomNav
+        currentPage={currentPage}
+        onNavigate={handleNavigate}
+      />
+
+      {/* Auth Modal (Login / Register / Demo Roles) */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onLoginSuccess={(role, name) => {
+          setUserRole(role);
+          triggerToast(`Welcome back, ${name}! Logged in as ${role === 'admin' ? 'Academic Director' : 'Medical Aspirant'}.`);
+        }}
+      />
+
+      {/* Payment Gateway Modal (bKash / Nagad / SSL) */}
+      <PaymentModal
+        isOpen={isPaymentModalOpen}
+        onClose={() => setIsPaymentModalOpen(false)}
+        course={selectedCourseForPayment}
+        onSuccess={handlePaymentSuccess}
+      />
+
+    </div>
+  );
+}
+
+export function App() {
+  return (
+    <ThemeProvider>
+      <LearningProvider>
+        <AppContent />
+      </LearningProvider>
+    </ThemeProvider>
+  );
+}
+
+export default App;
+

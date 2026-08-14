@@ -1,0 +1,6 @@
+{
+  "name": "MediSpark - HSC & Medical Admission Platform",
+  "description": "Premium educational platform for HSC academic preparation, Medical admission coaching, AI study assistant, mock exams, and student analytics in Bangladesh.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

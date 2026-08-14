@@ -1,0 +1,181 @@
+@import "tailwindcss";
+
+:root {
+  --primary-red: #E50914;
+  --primary-red-hover: #b8060f;
+  --deep-black: #111318;
+  --surface: #15171C;
+  --surface-secondary: #121418;
+  --text-main: #FFFFFF;
+  --text-muted: #94A3B8;
+  --glass: rgba(255, 255, 255, 0.03);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-focus: rgba(229, 9, 20, 0.4);
+  --ecg-line: rgba(229, 9, 20, 0.2);
+}
+
+.dark {
+  --deep-black: #111318;
+  --surface: #15171C;
+  --surface-secondary: #121418;
+  --text-main: #FFFFFF;
+  --text-muted: #94A3B8;
+  --glass: rgba(255, 255, 255, 0.03);
+  --border: rgba(255, 255, 255, 0.08);
+}
+
+.light {
+  --deep-black: #F8F9FA;
+  --surface: #FFFFFF;
+  --surface-secondary: #F1F5F9;
+  --text-main: #0F172A;
+  --text-muted: #64748B;
+  --glass: rgba(0, 0, 0, 0.02);
+  --border: rgba(15, 23, 42, 0.1);
+  --border-focus: rgba(229, 9, 20, 0.5);
+  --ecg-line: rgba(229, 9, 20, 0.15);
+}
+
+.light body, html.light body {
+  background-color: #F8F9FA;
+  color: #0F172A;
+}
+
+.light .bg-[#090909],
+.light .bg-[#111318],
+.light .bg-[#0a0b0e],
+.light .bg-[#0b0c0f] {
+  background-color: #FFFFFF !important;
+  color: #0F172A !important;
+}
+
+.light .bg-[#15171C],
+.light .bg-[#141620],
+.light .bg-[#141622],
+.light .bg-[#161822],
+.light .bg-[#171922],
+.light .bg-[#181b24] {
+  background-color: #F8FAFC !important;
+  color: #0F172A !important;
+}
+
+.light .text-gray-300,
+.light .text-gray-400 {
+  color: #475569 !important;
+}
+
+.light .border-white\/10,
+.light .border-white\/5 {
+  border-color: rgba(15, 23, 42, 0.1) !important;
+}
+
+
+@layer base {
+  * {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  
+  body {
+    background-color: var(--deep-black);
+    color: #ffffff;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 0;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-heading {
+    font-family: 'Outfit', 'Inter', sans-serif;
+  }
+}
+
+.bg-pattern {
+  position: fixed;
+  inset: 0;
+  background-image: 
+    radial-gradient(circle at 20% 25%, rgba(229, 9, 20, 0.05) 0%, transparent 45%),
+    radial-gradient(circle at 80% 75%, rgba(229, 9, 20, 0.05) 0%, transparent 45%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.01) 0%, transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.dashboard-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  transition: all 0.2s ease-in-out;
+}
+
+.dashboard-card:hover {
+  border-color: rgba(229, 9, 20, 0.35);
+}
+
+.ai-badge {
+  background: linear-gradient(135deg, var(--primary-red), #FF3540);
+  padding: 4px 12px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #ffffff;
+}
+
+.pill-tag {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #0d0e12;
+}
+::-webkit-scrollbar-thumb {
+  background: #232732;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #E50914;
+}
+
+/* Heartbeat pulse animation */
+@keyframes ecgPulse {
+  0% {
+    stroke-dashoffset: 600;
+  }
+  50% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -600;
+  }
+}
+
+.animate-ecg {
+  stroke-dasharray: 600;
+  animation: ecgPulse 3.5s linear infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.05);
+  }
+}
+
+.animate-glow {
+  animation: pulseGlow 4s ease-in-out infinite;
+}
+
