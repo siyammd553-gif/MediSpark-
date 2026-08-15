@@ -10,6 +10,7 @@ import {
   ActiveLearningPosition 
 } from '../types';
 import { ENROLLED_COURSES_DATA, INITIAL_USER_LEARNING_STATE } from '../data/learningData';
+import { useAuth } from './AuthContext';
 
 interface LearningContextType {
   userState: UserLearningState;
@@ -53,19 +54,37 @@ const LearningContext = createContext<LearningContextType | undefined>(undefined
 
 const LOCAL_STORAGE_KEY = 'medispark_student_learning_state_v1';
 
-export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [coursesData, setCoursesData] = useState<Record<string, EnrolledCourseData>>(ENROLLED_COURSES_DATA);
-  const [userState, setUserState] = useState<UserLearningState>(() => {
-    try {
-      const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch (e) {
-      console.error('Error loading saved learning state', e);
+// Per-student learning state is namespaced by the authenticated Student Account ID
+function learningStorageKey(accountId: string | null): string {
+  return accountId ? `${LOCAL_STORAGE_KEY}_${accountId}` : LOCAL_STORAGE_KEY;
+}
+
+function loadLearningState(key: string): UserLearningState {
+  try {
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      return JSON.parse(saved);
     }
-    return INITIAL_USER_LEARNING_STATE;
-  });
+  } catch (e) {
+    console.error('Error loading saved learning state', e);
+  }
+  return INITIAL_USER_LEARNING_STATE;
+}
+
+export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { accountId } = useAuth();
+  const [storageKey, setStorageKey] = useState<string>(learningStorageKey(accountId));
+  const [coursesData, setCoursesData] = useState<Record<string, EnrolledCourseData>>(ENROLLED_COURSES_DATA);
+  const [userState, setUserState] = useState<UserLearningState>(() =>
+    loadLearningState(learningStorageKey(accountId))
+  );
+
+  // Reload per-student learning state when the authenticated account changes
+  useEffect(() => {
+    const nextKey = learningStorageKey(accountId);
+    setStorageKey(nextKey);
+    setUserState(loadLearningState(nextKey));
+  }, [accountId]);
 
   const [activeCourseId, setActiveCourseId] = useState<string>('hsc-28-complete-biology');
   const [activeSegmentId, setActiveSegmentId] = useState<string>('seg-hsc28-01');
@@ -76,14 +95,14 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [activeExam, setActiveExam] = useState<ChapterExam | null>(null);
   const [activePdf, setActivePdf] = useState<ChapterPDF | null>(null);
 
-  // Sync to local storage
+  // Sync to local storage (per account)
   useEffect(() => {
     try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(userState));
+      localStorage.setItem(storageKey, JSON.stringify(userState));
     } catch (e) {
       console.error('Error saving learning state', e);
     }
-  }, [userState]);
+  }, [userState, storageKey]);
 
   // Navigate directly to a chapter
   const navigateToChapter = (

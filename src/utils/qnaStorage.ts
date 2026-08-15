@@ -1,15 +1,21 @@
 import { useState, useEffect } from 'react';
 import { QnAQuestion, QnAAnswer } from '../types';
 import { INITIAL_QNA_QUESTIONS } from '../data/qnaData';
+import { useAuth } from '../context/AuthContext';
 
 const QNA_STORAGE_KEY = 'medispark_qna_questions_v1';
 const QNA_EVENT = 'medispark_qna_updated';
 
-export function getStoredQnAQuestions(): QnAQuestion[] {
+// Q&A data is namespaced by the authenticated Student Account ID
+function qnaStorageKey(accountId: string | null): string {
+  return accountId ? `${QNA_STORAGE_KEY}_${accountId}` : QNA_STORAGE_KEY;
+}
+
+export function getStoredQnAQuestions(accountId: string | null = null): QnAQuestion[] {
   try {
-    const raw = localStorage.getItem(QNA_STORAGE_KEY);
+    const raw = localStorage.getItem(qnaStorageKey(accountId));
     if (!raw) {
-      localStorage.setItem(QNA_STORAGE_KEY, JSON.stringify(INITIAL_QNA_QUESTIONS));
+      localStorage.setItem(qnaStorageKey(accountId), JSON.stringify(INITIAL_QNA_QUESTIONS));
       return INITIAL_QNA_QUESTIONS;
     }
     return JSON.parse(raw);
@@ -19,17 +25,17 @@ export function getStoredQnAQuestions(): QnAQuestion[] {
   }
 }
 
-export function saveQnAQuestions(questions: QnAQuestion[]) {
+export function saveQnAQuestions(questions: QnAQuestion[], accountId: string | null = null) {
   try {
-    localStorage.setItem(QNA_STORAGE_KEY, JSON.stringify(questions));
+    localStorage.setItem(qnaStorageKey(accountId), JSON.stringify(questions));
     window.dispatchEvent(new CustomEvent(QNA_EVENT, { detail: questions }));
   } catch (e) {
     console.error('Failed to save Q&A data', e);
   }
 }
 
-export function addQnAQuestion(newQuestion: Omit<QnAQuestion, 'id' | 'createdAt' | 'upvotes' | 'answers'> & { aiAutoSolve?: boolean }): QnAQuestion {
-  const current = getStoredQnAQuestions();
+export function addQnAQuestion(newQuestion: Omit<QnAQuestion, 'id' | 'createdAt' | 'upvotes' | 'answers'> & { aiAutoSolve?: boolean }, accountId: string | null = null): QnAQuestion {
+  const current = getStoredQnAQuestions(accountId);
   
   const createdQuestion: QnAQuestion = {
     id: `qna-${Date.now()}`,
@@ -69,12 +75,12 @@ Always remember to correlate textbook definitions from Abul Hasan / Gazi Ajmal a
   }
 
   const updated = [createdQuestion, ...current];
-  saveQnAQuestions(updated);
+  saveQnAQuestions(updated, accountId);
   return createdQuestion;
 }
 
-export function addQnAAnswer(questionId: string, answerText: string, authorName = 'Student', authorRole: QnAAnswer['authorRole'] = 'Student') {
-  const current = getStoredQnAQuestions();
+export function addQnAAnswer(questionId: string, answerText: string, authorName = 'Student', authorRole: QnAAnswer['authorRole'] = 'Student', accountId: string | null = null) {
+  const current = getStoredQnAQuestions(accountId);
   const updated = current.map((q) => {
     if (q.id === questionId) {
       const newAns: QnAAnswer = {
@@ -93,11 +99,11 @@ export function addQnAAnswer(questionId: string, answerText: string, authorName 
     }
     return q;
   });
-  saveQnAQuestions(updated);
+  saveQnAQuestions(updated, accountId);
 }
 
-export function toggleQuestionUpvote(questionId: string) {
-  const current = getStoredQnAQuestions();
+export function toggleQuestionUpvote(questionId: string, accountId: string | null = null) {
+  const current = getStoredQnAQuestions(accountId);
   const updated = current.map((q) => {
     if (q.id === questionId) {
       const isUpvoted = !!q.userUpvoted;
@@ -113,11 +119,16 @@ export function toggleQuestionUpvote(questionId: string) {
 }
 
 export function useQnAData() {
-  const [questions, setQuestions] = useState<QnAQuestion[]>(() => getStoredQnAQuestions());
+  const { accountId } = useAuth();
+  const [questions, setQuestions] = useState<QnAQuestion[]>(() => getStoredQnAQuestions(accountId));
+
+  useEffect(() => {
+    setQuestions(getStoredQnAQuestions(accountId));
+  }, [accountId]);
 
   useEffect(() => {
     const handleUpdate = () => {
-      setQuestions(getStoredQnAQuestions());
+      setQuestions(getStoredQnAQuestions(accountId));
     };
 
     window.addEventListener(QNA_EVENT, handleUpdate);
@@ -127,12 +138,13 @@ export function useQnAData() {
       window.removeEventListener(QNA_EVENT, handleUpdate);
       window.removeEventListener('storage', handleUpdate);
     };
-  }, []);
+  }, [accountId]);
 
   return {
     questions,
-    postQuestion: addQnAQuestion,
-    postAnswer: addQnAAnswer,
-    upvoteQuestion: toggleQuestionUpvote
+    postQuestion: (q: Parameters<typeof addQnAQuestion>[0]) => addQnAQuestion(q, accountId),
+    postAnswer: (questionId: string, answerText: string, authorName?: string, authorRole?: QnAAnswer['authorRole']) =>
+      addQnAAnswer(questionId, answerText, authorName, authorRole, accountId),
+    upvoteQuestion: (questionId: string) => toggleQuestionUpvote(questionId, accountId)
   };
 }

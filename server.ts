@@ -2,6 +2,17 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import {
+  authRouter,
+  requireAuth,
+  requireRole,
+  getAuthenticatedUser,
+  getStudentRecord,
+  syncStudentRecordFromProfile,
+  sanitizeUser,
+  seedAccounts,
+} from './server/auth';
+import { createStudentRecord, listStudentRecords, getUsers } from './server/store';
 
 dotenv.config();
 
@@ -9,6 +20,9 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Seed default Admin / Teacher / Demo-Student accounts on first boot
+seedAccounts();
 
 // Lazy-initialized Gemini AI Client
 let aiClient: GoogleGenAI | null = null;
@@ -28,9 +42,99 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', brand: 'MediSpark', timestamp: new Date().toISOString() });
 });
 
+// =============================================================
+// CENTRAL AUTHENTICATION SYSTEM
+// - Register / Login / Logout / Session (HttpOnly cookies)
+// - Secure password hashing (scrypt + salt)
+// - Role-based access control (student / teacher / admin)
+// - Student-specific database records keyed by Student Account ID
+// =============================================================
+app.use('/api/auth', authRouter);
+
+// Current authenticated account (client bootstraps session from here)
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  res.json({ user: sanitizeUser((req as express.Request & { user: any }).user) });
+});
+
+// Student-specific profile record (tied to the authenticated Student Account ID)
+app.get('/api/student/profile', requireAuth, requireRole('student'), (req, res) => {
+  const user = (req as express.Request & { user: any }).user;
+  const record = getStudentRecord(user.accountId);
+  if (!record) {
+    const fresh = createStudentRecord(user);
+    return res.json({ profile: fresh, account: sanitizeUser(user) });
+  }
+  res.json({ profile: record, account: sanitizeUser(user) });
+});
+
+app.patch('/api/student/profile', requireAuth, requireRole('student'), (req, res) => {
+  const user = (req as express.Request & { user: any }).user;
+  const updated = syncStudentRecordFromProfile(user.accountId, req.body || {});
+  if (!updated) {
+    return res.status(404).json({ error: 'Student record not found.' });
+  }
+  res.json({ profile: updated });
+});
+
+// Student-specific database records (all future student features keyed by Account ID)
+app.get('/api/student/records', requireAuth, (req, res) => {
+  const user = (req as express.Request & { user: any }).user;
+  res.json({
+    accountId: user.accountId,
+    studentId: user.studentId,
+    role: user.role,
+    record: getStudentRecord(user.accountId),
+    // Namespaced client storage keys for this account (per-student data separation)
+    storage: {
+      profileKey: `medispark_custom_student_profile_v1_${user.accountId}`,
+      avatarKey: `medispark_custom_student_avatar_v1_${user.accountId}`,
+      learningKey: `medispark_student_learning_state_v1_${user.accountId}`,
+      favoritesKey: `medispark_student_favorites_v1_${user.accountId}`,
+      qnaKey: `medispark_qna_questions_v1_${user.accountId}`,
+    },
+  });
+});
+
+// Role-based access: Admin only
+app.get('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
+  res.json({
+    total: getUsers().length,
+    users: getUsers().map((u) => ({
+      accountId: u.accountId,
+      studentId: u.studentId,
+      role: u.role,
+      name: u.name,
+      email: u.email,
+      createdAt: u.createdAt,
+    })),
+  });
+});
+
+// Role-based access: Teacher / Admin
+app.get('/api/teacher/students', requireAuth, requireRole('teacher', 'admin'), (req, res) => {
+  res.json({
+    total: listStudentRecords().length,
+    students: listStudentRecords().map((s) => ({
+      accountId: s.accountId,
+      studentId: s.studentId,
+      name: s.name,
+      batch: s.batch,
+      college: s.college,
+      updatedAt: s.updatedAt,
+    })),
+  });
+});
+
 // AI Study Assistant / Doubt Solver API endpoint
 app.post('/api/ai-tutor', async (req, res) => {
   const { prompt, studentName, weakTopics, targetCollege } = req.body;
+
+  // Authenticated student context (optional; AI tutor stays usable for guests)
+  const authUser = getAuthenticatedUser(req);
+  const accountId = authUser?.accountId || 'guest';
+  if (authUser) {
+    console.log(`[ai-tutor] Request from account ${accountId} (${authUser.name})`);
+  }
 
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: 'Prompt is required' });

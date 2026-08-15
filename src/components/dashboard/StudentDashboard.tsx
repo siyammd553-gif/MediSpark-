@@ -10,6 +10,7 @@ import { StudentPictureModal } from './StudentPictureModal';
 import { StudentProfileEditModal } from './StudentProfileEditModal';
 import { useStudentProfile } from '../../utils/studentStorage';
 import { useFavorites } from '../../utils/favoriteStorage';
+import { useAuth } from '../../context/AuthContext';
 import { 
   User,
   GraduationCap, 
@@ -34,6 +35,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 }) => {
   const { profile, updateProfile } = useStudentProfile(INITIAL_STUDENT_PROFILE);
   const { totalCount: totalFavorites } = useFavorites();
+  const { accountId, studentId, role, isAuthenticated } = useAuth();
   
   const [isPictureModalOpen, setIsPictureModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -111,7 +113,13 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 </span>
               </div>
               <p className="text-xs text-gray-400 font-mono">
-                ID: <span className="text-gray-300 font-semibold">{profile.id}</span> • {profile.college}
+                ID: <span className="text-gray-300 font-semibold">{studentId || profile.id}</span> • Account:{' '}
+                <span className="text-gray-300 font-semibold">{accountId || 'MSP-…'}</span> • {profile.college}
+                {isAuthenticated && role && (
+                  <span className="ml-2 text-[10px] font-black uppercase px-2 py-0.5 bg-blue-500/20 border border-blue-500/40 text-blue-300 rounded-md">
+                    {role}
+                  </span>
+                )}
               </p>
             </div>
           </div>

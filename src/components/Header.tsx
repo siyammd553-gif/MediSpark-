@@ -7,6 +7,7 @@ import {
   Sparkles, 
   User, 
   LogIn, 
+  LogOut,
   Flame, 
   GraduationCap, 
   ChevronRight,
@@ -27,6 +28,9 @@ interface HeaderProps {
   isLoggedIn: boolean;
   userStreak: number;
   unreadNotificationsCount?: number;
+  userName?: string;
+  userRole?: 'student' | 'teacher' | 'admin' | null;
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,6 +41,9 @@ export const Header: React.FC<HeaderProps> = ({
   isLoggedIn,
   userStreak,
   unreadNotificationsCount = 2,
+  userName = '',
+  userRole = null,
+  onLogout,
 }) => {
   const [scrolled, setScrolled] = useState(false);
   const { theme, toggleTheme } = useTheme();
@@ -193,15 +200,34 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Student Portal / Login CTA Button */}
           {isLoggedIn ? (
-            <button
-              id="student-dashboard-cta-btn"
-              onClick={() => onNavigate('dashboard')}
-              className="flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-[#E50914] to-[#c20510] hover:from-[#f51420] hover:to-[#E50914] text-white text-xs sm:text-sm font-bold shadow-[0_4px_16px_rgba(229,9,20,0.4)] transition-all hover:scale-102 active:scale-98"
-            >
-              <GraduationCap className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">My Dashboard</span>
-              <span className="sm:hidden">Dashboard</span>
-            </button>
+            <>
+              <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10">
+                <span className="text-[11px] font-black uppercase tracking-wide text-[#FF3540]">
+                  {userRole === 'admin' ? 'Admin' : userRole === 'teacher' ? 'Teacher' : 'Student'}
+                </span>
+                <span className="max-w-[110px] truncate text-xs font-semibold text-gray-200">
+                  {userName}
+                </span>
+              </div>
+              <button
+                id="student-dashboard-cta-btn"
+                onClick={() => onNavigate('dashboard')}
+                className="flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl bg-gradient-to-r from-[#E50914] to-[#c20510] hover:from-[#f51420] hover:to-[#E50914] text-white text-xs sm:text-sm font-bold shadow-[0_4px_16px_rgba(229,9,20,0.4)] transition-all hover:scale-102 active:scale-98"
+              >
+                <GraduationCap className="w-4 h-4 shrink-0" />
+                <span className="hidden sm:inline">My Dashboard</span>
+                <span className="sm:hidden">Dashboard</span>
+              </button>
+              <button
+                id="header-logout-btn"
+                onClick={onLogout}
+                title="Logout (end session securely)"
+                aria-label="Logout"
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-[#FF3540] transition-all flex items-center justify-center"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </>
           ) : (
             <button
               id="header-login-btn"

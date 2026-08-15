@@ -3,6 +3,7 @@ import { PageView, Course } from './types';
 import { COURSES_DATA } from './data/mockData';
 import { ThemeProvider } from './context/ThemeContext';
 import { LearningProvider, useLearning } from './context/LearningContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { Header } from './components/Header';
 import { NavigationDrawer } from './components/NavigationDrawer';
 import { MobileBottomNav } from './components/MobileBottomNav';
@@ -40,9 +41,9 @@ export function AppContent() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedCourseForPayment, setSelectedCourseForPayment] = useState<Course | null>(null);
-  const [userRole, setUserRole] = useState<'student' | 'admin' | 'guest'>('student');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  const { user, isAuthenticated, isReady, role, logout } = useAuth();
   const { enrollInCourse, navigateToCourse } = useLearning();
 
   // Scroll to top on page navigate
@@ -85,6 +86,22 @@ export function AppContent() {
     }, 1000);
   };
 
+  const handleLogout = async () => {
+    await logout();
+    triggerToast('👋 Logged out. Your session has been securely closed.');
+  };
+
+  if (!isReady) {
+    return (
+      <div className="min-h-screen bg-[#090909] flex items-center justify-center">
+        <div className="flex items-center gap-3 text-gray-400 text-sm font-semibold">
+          <span className="w-4 h-4 rounded-full border-2 border-[#E50914] border-t-transparent animate-spin" />
+          Securing MediSpark session...
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#090909] text-white flex flex-col font-sans selection:bg-[#E50914] selection:text-white relative">
       {/* Elegant Dark Subtle Radial Pattern Layer */}
@@ -104,6 +121,11 @@ export function AppContent() {
         onNavigate={handleNavigate}
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onOpenNavDrawer={() => setIsNavDrawerOpen(true)}
+        isLoggedIn={isAuthenticated}
+        userStreak={14}
+        userName={user?.name || ''}
+        userRole={role || null}
+        onLogout={handleLogout}
       />
 
       {/* Responsive Navigation Drawer */}
@@ -116,7 +138,7 @@ export function AppContent() {
           setIsNavDrawerOpen(false);
           setIsAuthModalOpen(true);
         }}
-        isLoggedIn={true}
+        isLoggedIn={isAuthenticated}
         userStreak={14}
       />
 
@@ -222,9 +244,14 @@ export function AppContent() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
-        onLoginSuccess={(role, name) => {
-          setUserRole(role);
-          triggerToast(`Welcome back, ${name}! Logged in as ${role === 'admin' ? 'Academic Director' : 'Medical Aspirant'}.`);
+        onLoginSuccess={(name, role, accountId) => {
+          const roleLabel =
+            role === 'admin'
+              ? 'Academic Director'
+              : role === 'teacher'
+                ? 'Mentor / Faculty'
+                : 'Medical Aspirant';
+          triggerToast(`Welcome back, ${name}! Logged in as ${roleLabel}. Account: ${accountId}`);
         }}
       />
 
@@ -242,11 +269,13 @@ export function AppContent() {
 
 export function App() {
   return (
-    <ThemeProvider>
-      <LearningProvider>
-        <AppContent />
-      </LearningProvider>
-    </ThemeProvider>
+    <AuthProvider>
+      <ThemeProvider>
+        <LearningProvider>
+          <AppContent />
+        </LearningProvider>
+      </ThemeProvider>
+    </AuthProvider>
   );
 }
 

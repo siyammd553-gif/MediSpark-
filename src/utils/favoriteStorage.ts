@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
 
 export interface FavoriteClassItem {
   id: string;
@@ -57,6 +58,11 @@ export interface StudentFavoritesStore {
 
 const STORAGE_KEY = 'medispark_student_favorites_v1';
 const EVENT_KEY = 'medispark_favorites_updated';
+
+// Favorites are namespaced by the authenticated Student Account ID
+function favoritesStorageKey(accountId: string | null): string {
+  return accountId ? `${STORAGE_KEY}_${accountId}` : STORAGE_KEY;
+}
 
 export const INITIAL_FAVORITES: StudentFavoritesStore = {
   classes: [
@@ -175,12 +181,12 @@ export const INITIAL_FAVORITES: StudentFavoritesStore = {
   ]
 };
 
-export function getFavoritesFromStorage(): StudentFavoritesStore {
+export function getFavoritesFromStorage(accountId: string | null = null): StudentFavoritesStore {
   if (typeof window === 'undefined') return INITIAL_FAVORITES;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(favoritesStorageKey(accountId));
     if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_FAVORITES));
+      localStorage.setItem(favoritesStorageKey(accountId), JSON.stringify(INITIAL_FAVORITES));
       return INITIAL_FAVORITES;
     }
     const parsed = JSON.parse(raw);
@@ -195,7 +201,7 @@ export function getFavoritesFromStorage(): StudentFavoritesStore {
   }
 }
 
-export function saveFavoritesToStorage(store: StudentFavoritesStore): void {
+export function saveFavoritesToStorage(store: StudentFavoritesStore, accountId: string | null = null): void {
   if (typeof window === 'undefined') return;
   try {
     const cleanStore: StudentFavoritesStore = {
@@ -203,7 +209,7 @@ export function saveFavoritesToStorage(store: StudentFavoritesStore): void {
       documents: Array.isArray(store?.documents) ? store.documents : [],
       results: Array.isArray(store?.results) ? store.results : []
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cleanStore));
+    localStorage.setItem(favoritesStorageKey(accountId), JSON.stringify(cleanStore));
     window.dispatchEvent(new CustomEvent(EVENT_KEY, { detail: cleanStore }));
   } catch (err) {
     console.error('Failed to save favorites to localStorage', err);
@@ -211,11 +217,16 @@ export function saveFavoritesToStorage(store: StudentFavoritesStore): void {
 }
 
 export function useFavorites() {
-  const [favorites, setFavorites] = useState<StudentFavoritesStore>(getFavoritesFromStorage);
+  const { accountId } = useAuth();
+  const [favorites, setFavorites] = useState<StudentFavoritesStore>(() => getFavoritesFromStorage(accountId));
+
+  useEffect(() => {
+    setFavorites(getFavoritesFromStorage(accountId));
+  }, [accountId]);
 
   useEffect(() => {
     const handleUpdate = () => {
-      setFavorites(getFavoritesFromStorage());
+      setFavorites(getFavoritesFromStorage(accountId));
     };
 
     window.addEventListener(EVENT_KEY, handleUpdate);
@@ -224,10 +235,10 @@ export function useFavorites() {
       window.removeEventListener(EVENT_KEY, handleUpdate);
       window.removeEventListener('storage', handleUpdate);
     };
-  }, []);
+  }, [accountId]);
 
   const addFavoriteClass = (item: Omit<FavoriteClassItem, 'type' | 'dateAdded'>) => {
-    const current = getFavoritesFromStorage();
+    const current = getFavoritesFromStorage(accountId);
     const existingClasses = Array.isArray(current.classes) ? current.classes : [];
     if (existingClasses.some(c => c.id === item.id)) return;
 
@@ -241,23 +252,23 @@ export function useFavorites() {
       ...current,
       classes: [newItem, ...existingClasses]
     };
-    saveFavoritesToStorage(updated);
+    saveFavoritesToStorage(updated, accountId);
     setFavorites(updated);
   };
 
   const removeFavoriteClass = (id: string) => {
-    const current = getFavoritesFromStorage();
+    const current = getFavoritesFromStorage(accountId);
     const existingClasses = Array.isArray(current.classes) ? current.classes : [];
     const updated: StudentFavoritesStore = {
       ...current,
       classes: existingClasses.filter(c => c.id !== id)
     };
-    saveFavoritesToStorage(updated);
+    saveFavoritesToStorage(updated, accountId);
     setFavorites(updated);
   };
 
   const addFavoriteDocument = (item: Omit<FavoriteDocumentItem, 'type' | 'dateAdded'>) => {
-    const current = getFavoritesFromStorage();
+    const current = getFavoritesFromStorage(accountId);
     const existingDocs = Array.isArray(current.documents) ? current.documents : [];
     if (existingDocs.some(d => d.id === item.id)) return;
 
@@ -271,23 +282,23 @@ export function useFavorites() {
       ...current,
       documents: [newItem, ...existingDocs]
     };
-    saveFavoritesToStorage(updated);
+    saveFavoritesToStorage(updated, accountId);
     setFavorites(updated);
   };
 
   const removeFavoriteDocument = (id: string) => {
-    const current = getFavoritesFromStorage();
+    const current = getFavoritesFromStorage(accountId);
     const existingDocs = Array.isArray(current.documents) ? current.documents : [];
     const updated: StudentFavoritesStore = {
       ...current,
       documents: existingDocs.filter(d => d.id !== id)
     };
-    saveFavoritesToStorage(updated);
+    saveFavoritesToStorage(updated, accountId);
     setFavorites(updated);
   };
 
   const addFavoriteResult = (item: Omit<FavoriteExamResultItem, 'type' | 'dateAdded'>) => {
-    const current = getFavoritesFromStorage();
+    const current = getFavoritesFromStorage(accountId);
     const existingResults = Array.isArray(current.results) ? current.results : [];
     if (existingResults.some(r => r.id === item.id)) return;
 
@@ -301,18 +312,18 @@ export function useFavorites() {
       ...current,
       results: [newItem, ...existingResults]
     };
-    saveFavoritesToStorage(updated);
+    saveFavoritesToStorage(updated, accountId);
     setFavorites(updated);
   };
 
   const removeFavoriteResult = (id: string) => {
-    const current = getFavoritesFromStorage();
+    const current = getFavoritesFromStorage(accountId);
     const existingResults = Array.isArray(current.results) ? current.results : [];
     const updated: StudentFavoritesStore = {
       ...current,
       results: existingResults.filter(r => r.id !== id)
     };
-    saveFavoritesToStorage(updated);
+    saveFavoritesToStorage(updated, accountId);
     setFavorites(updated);
   };
 
