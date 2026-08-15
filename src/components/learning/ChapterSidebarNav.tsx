@@ -37,13 +37,15 @@ export const ChapterSidebarNav: React.FC<ChapterSidebarNavProps> = ({
     isChapterUnlocked 
   } = useLearning();
 
-  const course = coursesData[activeCourseId] || coursesData['hsc-28-complete-biology'];
-  const courseProgress = getCourseProgress(course.courseId);
+  const course = coursesData[activeCourseId];
+  const courseProgress = course
+    ? getCourseProgress(course.courseId)
+    : { percentage: 0, completedChapters: 0, totalChapters: 0, completedClasses: 0, totalClasses: 0 };
 
   // Keep all segments expanded in sidebar for easy navigation
   const [expandedSegments, setExpandedSegments] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
-    course.segments.forEach(s => {
+    (course?.segments || []).forEach(s => {
       init[s.id] = true;
     });
     return init;
@@ -65,6 +67,9 @@ export const ChapterSidebarNav: React.FC<ChapterSidebarNavProps> = ({
     navigateToChapter(course.courseId, segId, chapId);
     if (onCloseMobile) onCloseMobile();
   };
+
+  // This sidebar only renders inside an enrolled course's chapter page.
+  if (!course) return null;
 
   const content = (
     <div className="flex flex-col h-full bg-[#111318] text-white">

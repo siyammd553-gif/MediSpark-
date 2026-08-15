@@ -1,15 +1,16 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { 
   EnrolledCourseData, 
-  CourseSegment, 
   Chapter, 
   ChapterClass, 
   ChapterExam, 
   ChapterPDF, 
   UserLearningState, 
-  ActiveLearningPosition 
+  ActiveLearningPosition,
+  RecentlyViewedItem,
+  MockResult
 } from '../types';
-import { ENROLLED_COURSES_DATA, INITIAL_USER_LEARNING_STATE } from '../data/learningData';
+import { ENROLLED_COURSES_DATA } from '../data/learningData';
 import { useAuth } from './AuthContext';
 
 interface LearningContextType {
@@ -42,6 +43,7 @@ interface LearningContextType {
   recordExamSubmission: (examId: string, score: number, totalMarks: number) => void;
   markPdfViewed: (pdfId: string) => void;
   enrollInCourse: (courseId: string) => void;
+  isCourseEnrolled: (courseId: string) => boolean;
 
   // Computed Progress Helpers
   getCourseProgress: (courseId: string) => { percentage: number; completedChapters: number; totalChapters: number; completedClasses: number; totalClasses: number };
@@ -52,96 +54,133 @@ interface LearningContextType {
 
 const LearningContext = createContext<LearningContextType | undefined>(undefined);
 
-const LOCAL_STORAGE_KEY = 'medispark_student_learning_state_v1';
+const EMPTY_POSITION: ActiveLearningPosition = { courseId: '', segmentId: '', chapterId: '' };
 
-// Per-student learning state is namespaced by the authenticated Student Account ID
-function learningStorageKey(accountId: string | null): string {
-  return accountId ? `${LOCAL_STORAGE_KEY}_${accountId}` : LOCAL_STORAGE_KEY;
-}
-
-function loadLearningState(key: string): UserLearningState {
-  try {
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      return JSON.parse(saved);
-    }
-  } catch (e) {
-    console.error('Error loading saved learning state', e);
-  }
-  return INITIAL_USER_LEARNING_STATE;
-}
+const RECENTLY_VIEWED_MAX = 20;
 
 export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { accountId } = useAuth();
-  const [storageKey, setStorageKey] = useState<string>(learningStorageKey(accountId));
-  const [coursesData, setCoursesData] = useState<Record<string, EnrolledCourseData>>(ENROLLED_COURSES_DATA);
-  const [userState, setUserState] = useState<UserLearningState>(() =>
-    loadLearningState(learningStorageKey(accountId))
-  );
-
-  // Reload per-student learning state when the authenticated account changes
-  useEffect(() => {
-    const nextKey = learningStorageKey(accountId);
-    setStorageKey(nextKey);
-    setUserState(loadLearningState(nextKey));
-  }, [accountId]);
+  const { accountId, dashboard, updateDashboard } = useAuth();
 
   const [activeCourseId, setActiveCourseId] = useState<string>('hsc-28-complete-biology');
   const [activeSegmentId, setActiveSegmentId] = useState<string>('seg-hsc28-01');
   const [activeChapterId, setActiveChapterId] = useState<string>('chap-hsc28-01');
   const [activeTab, setActiveTab] = useState<'classes' | 'exams' | 'pdfs' | 'more'>('classes');
-  
+
   const [activePlayingClass, setActivePlayingClass] = useState<ChapterClass | null>(null);
   const [activeExam, setActiveExam] = useState<ChapterExam | null>(null);
   const [activePdf, setActivePdf] = useState<ChapterPDF | null>(null);
 
-  // Sync to local storage (per account)
-  useEffect(() => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(userState));
-    } catch (e) {
-      console.error('Error saving learning state', e);
+  // The authenticated student's learning state is derived from their own
+  // server-backed dashboard record (keyed by Account ID). No hardcoded seeding.
+  const userState: UserLearningState = {
+    enrolledCourseIds: dashboard?.enrolledCourseIds ?? [],
+    completedClassIds: dashboard?.completedClassIds ?? [],
+    completedExamIds: dashboard?.completedExamIds ?? {},
+    viewedPdfIds: dashboard?.viewedPdfIds ?? [],
+    lastActivePosition: dashboard?.lastActivePosition ?? EMPTY_POSITION,
+  };
+
+  // Only the courses this authenticated student has actually enrolled in are
+  // exposed. This keeps every student's course/class/material content isolated
+  // to their own account — a course not in their enrollment is never reachable.
+  const coursesData: Record<string, EnrolledCourseData> = useMemo(() => {
+    const enrolled: Record<string, EnrolledCourseData> = {};
+    for (const courseId of userState.enrolledCourseIds) {
+      const course = ENROLLED_COURSES_DATA[courseId];
+      if (course) enrolled[courseId] = course;
     }
-  }, [userState, storageKey]);
+    return enrolled;
+  }, [userState.enrolledCourseIds]);
+
+  const isCourseEnrolled = useCallback(
+    (courseId: string) => userState.enrolledCourseIds.includes(courseId),
+    [userState.enrolledCourseIds]
+  );
+
+  const trackRecentlyViewed = useCallback(
+    (item: Omit<RecentlyViewedItem, 'viewedAt'>) => {
+      if (!accountId) return;
+      const current = dashboard?.recentlyViewed ?? [];
+      const entry: RecentlyViewedItem = { ...item, viewedAt: new Date().toISOString() };
+      const deduped = current.filter((r) => r.id !== entry.id);
+      updateDashboard({
+        recentlyViewed: [entry, ...deduped].slice(0, RECENTLY_VIEWED_MAX),
+      });
+    },
+    [accountId, dashboard?.recentlyViewed, updateDashboard]
+  );
 
   // Navigate directly to a chapter
-  const navigateToChapter = (
-    courseId: string, 
-    segmentId: string, 
-    chapterId: string, 
-    tab: 'classes' | 'exams' | 'pdfs' | 'more' = 'classes'
-  ) => {
-    setActiveCourseId(courseId);
-    setActiveSegmentId(segmentId);
-    setActiveChapterId(chapterId);
-    setActiveTab(tab);
+  const navigateToChapter = useCallback(
+    (
+      courseId: string,
+      segmentId: string,
+      chapterId: string,
+      tab: 'classes' | 'exams' | 'pdfs' | 'more' = 'classes'
+    ) => {
+      setActiveCourseId(courseId);
+      setActiveSegmentId(segmentId);
+      setActiveChapterId(chapterId);
+      setActiveTab(tab);
 
-    setUserState(prev => ({
-      ...prev,
-      lastActivePosition: {
+      const lastActivePosition: ActiveLearningPosition = {
         courseId,
         segmentId,
         chapterId,
         tab,
-        lastUpdated: 'Just now'
+        lastUpdated: 'Just now',
+      };
+      if (accountId) {
+        updateDashboard({ lastActivePosition });
+        trackRecentlyViewed({ id: chapterId, type: 'chapter', courseId, chapterId, title: chapterId });
       }
-    }));
-  };
+    },
+    [accountId, updateDashboard, trackRecentlyViewed]
+  );
 
-  const navigateToCourse = (courseId: string) => {
-    setActiveCourseId(courseId);
-    const course = coursesData[courseId];
-    if (course && course.segments.length > 0) {
-      const firstSeg = course.segments[0];
-      setActiveSegmentId(firstSeg.id);
-      if (firstSeg.chapters.length > 0) {
-        setActiveChapterId(firstSeg.chapters[0].id);
+  const navigateToCourse = useCallback(
+    (courseId: string) => {
+      setActiveCourseId(courseId);
+      const course = coursesData[courseId];
+      if (course && course.segments.length > 0) {
+        const firstSeg = course.segments[0];
+        setActiveSegmentId(firstSeg.id);
+        if (firstSeg.chapters.length > 0) {
+          const firstChap = firstSeg.chapters[0];
+          setActiveChapterId(firstChap.id);
+          if (accountId) {
+            trackRecentlyViewed({
+              id: firstChap.id,
+              type: 'chapter',
+              courseId,
+              chapterId: firstChap.id,
+              title: firstChap.title,
+            });
+          }
+        }
       }
-    }
-  };
+    },
+    [accountId, coursesData, trackRecentlyViewed]
+  );
 
   const continueLearning = () => {
-    const pos = userState.lastActivePosition || INITIAL_USER_LEARNING_STATE.lastActivePosition;
+    let pos = dashboard?.lastActivePosition || EMPTY_POSITION;
+    const enrolledIds = userState.enrolledCourseIds;
+    if (!pos.courseId || !coursesData[pos.courseId]) {
+      const firstId = enrolledIds[0];
+      const firstCourse = firstId ? coursesData[firstId] : undefined;
+      if (firstCourse) {
+        const firstSeg = firstCourse.segments[0];
+        const firstChap = firstSeg?.chapters[0];
+        pos = {
+          courseId: firstId,
+          segmentId: firstSeg?.id || '',
+          chapterId: firstChap?.id || '',
+          classId: firstChap?.classes[0]?.id,
+          tab: 'classes' as const,
+        };
+      }
+    }
     setActiveCourseId(pos.courseId);
     setActiveSegmentId(pos.segmentId);
     setActiveChapterId(pos.chapterId);
@@ -149,61 +188,93 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return pos;
   };
 
-  const markClassCompleted = (classId: string) => {
-    setUserState(prev => {
-      if (prev.completedClassIds.includes(classId)) return prev;
-      return {
-        ...prev,
-        completedClassIds: [...prev.completedClassIds, classId]
-      };
-    });
-  };
+  const markClassCompleted = useCallback(
+    (classId: string) => {
+      if (!accountId) return;
+      const current = dashboard?.completedClassIds ?? [];
+      if (current.includes(classId)) return;
+      updateDashboard({ completedClassIds: [...current, classId] });
+    },
+    [accountId, dashboard?.completedClassIds, updateDashboard]
+  );
 
-  const recordExamSubmission = (examId: string, score: number, totalMarks: number) => {
-    setUserState(prev => {
-      const current = prev.completedExamIds[examId];
-      const attempts = (current?.attempts || 0) + 1;
-      const bestScore = Math.max(current?.bestScore || 0, score);
-      return {
-        ...prev,
-        completedExamIds: {
-          ...prev.completedExamIds,
-          [examId]: {
-            bestScore,
-            lastScore: score,
-            attempts,
-            timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16)
+  const recordExamSubmission = useCallback(
+    (examId: string, score: number, totalMarks: number) => {
+      if (!accountId) return;
+      const current = dashboard?.completedExamIds ?? {};
+      const prev = current[examId];
+      const next: UserLearningState['completedExamIds'] = {
+        ...current,
+        [examId]: {
+          bestScore: Math.max(prev?.bestScore || 0, score),
+          lastScore: score,
+          attempts: (prev?.attempts || 0) + 1,
+          timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        },
+      };
+      updateDashboard({ completedExamIds: next });
+
+      // Record a per-student exam result on the dashboard (deduped by exam id).
+      let examTitle = 'Chapter Model Test';
+      let courseTitle = 'Chapter Exam';
+      for (const course of Object.values(coursesData)) {
+        for (const seg of course.segments) {
+          for (const chap of seg.chapters) {
+            const exam = chap.exams.find((e) => e.id === examId);
+            if (exam) {
+              examTitle = exam.examTitle;
+              courseTitle = course.title;
+              break;
+            }
           }
         }
+      }
+      const existingResults = dashboard?.examResults ?? [];
+      const accuracy = totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0;
+      const nextResults = existingResults.filter((r) => r.id !== examId);
+      const newResult: MockResult = {
+        id: examId,
+        examTitle,
+        subject: courseTitle,
+        date: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        score,
+        totalMarks,
+        negativeMarks: 0,
+        accuracy,
+        rank: 0,
+        totalParticipants: 0,
+        subjectBreakdown: [],
       };
-    });
-  };
+      updateDashboard({ examResults: [newResult, ...nextResults] });
+    },
+    [accountId, dashboard?.completedExamIds, dashboard?.examResults, coursesData, updateDashboard]
+  );
 
-  const markPdfViewed = (pdfId: string) => {
-    setUserState(prev => {
-      if (prev.viewedPdfIds.includes(pdfId)) return prev;
-      return {
-        ...prev,
-        viewedPdfIds: [...prev.viewedPdfIds, pdfId]
-      };
-    });
-  };
+  const markPdfViewed = useCallback(
+    (pdfId: string) => {
+      if (!accountId) return;
+      const current = dashboard?.viewedPdfIds ?? [];
+      if (current.includes(pdfId)) return;
+      updateDashboard({ viewedPdfIds: [...current, pdfId] });
+    },
+    [accountId, dashboard?.viewedPdfIds, updateDashboard]
+  );
 
-  const enrollInCourse = (courseId: string) => {
-    setUserState(prev => {
-      if (prev.enrolledCourseIds.includes(courseId)) return prev;
-      return {
-        ...prev,
-        enrolledCourseIds: [...prev.enrolledCourseIds, courseId]
-      };
-    });
-  };
+  const enrollInCourse = useCallback(
+    (courseId: string) => {
+      if (!accountId) return;
+      const current = dashboard?.enrolledCourseIds ?? [];
+      if (current.includes(courseId)) return;
+      updateDashboard({ enrolledCourseIds: [...current, courseId] });
+    },
+    [accountId, dashboard?.enrolledCourseIds, updateDashboard]
+  );
 
   // Check if chapter is completed
   const isChapterCompletedCheck = (chapter: Chapter) => {
     const classes = chapter.classes || [];
     if (classes.length === 0) return true;
-    const completedCount = classes.filter(c => userState.completedClassIds.includes(c.id)).length;
+    const completedCount = classes.filter((c) => userState.completedClassIds.includes(c.id)).length;
     return completedCount === classes.length;
   };
 
@@ -211,17 +282,17 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const getChapterProgress = (courseId: string, segmentId: string, chapterId: string) => {
     const course = coursesData[courseId];
     if (!course) return { percentage: 0, isCompleted: false, completedClasses: 0, totalClasses: 0 };
-    const seg = course.segments.find(s => s.id === segmentId);
+    const seg = course.segments.find((s) => s.id === segmentId);
     if (!seg) return { percentage: 0, isCompleted: false, completedClasses: 0, totalClasses: 0 };
-    const chap = seg.chapters.find(c => c.id === chapterId);
+    const chap = seg.chapters.find((c) => c.id === chapterId);
     if (!chap) return { percentage: 0, isCompleted: false, completedClasses: 0, totalClasses: 0 };
 
     const totalClasses = chap.classes.length;
-    const completedClasses = chap.classes.filter(c => userState.completedClassIds.includes(c.id)).length;
-    
+    const completedClasses = chap.classes.filter((c) => userState.completedClassIds.includes(c.id)).length;
+
     // Exam bonus
     const totalExams = chap.exams.length;
-    const completedExams = chap.exams.filter(e => !!userState.completedExamIds[e.id]).length;
+    const completedExams = chap.exams.filter((e) => !!userState.completedExamIds[e.id]).length;
 
     let percentage = 0;
     if (totalClasses > 0) {
@@ -239,14 +310,14 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const getSegmentProgress = (courseId: string, segmentId: string) => {
     const course = coursesData[courseId];
     if (!course) return { percentage: 0, completedChapters: 0, totalChapters: 0 };
-    const seg = course.segments.find(s => s.id === segmentId);
+    const seg = course.segments.find((s) => s.id === segmentId);
     if (!seg) return { percentage: 0, completedChapters: 0, totalChapters: 0 };
 
     const totalChapters = seg.chapters.length;
     let completedChapters = 0;
     let totalProgressSum = 0;
 
-    seg.chapters.forEach(chap => {
+    seg.chapters.forEach((chap) => {
       const prog = getChapterProgress(courseId, segmentId, chap.id);
       totalProgressSum += prog.percentage;
       if (prog.isCompleted) {
@@ -269,11 +340,11 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     let completedClasses = 0;
     let totalProgressSum = 0;
 
-    course.segments.forEach(seg => {
-      seg.chapters.forEach(chap => {
+    course.segments.forEach((seg) => {
+      seg.chapters.forEach((chap) => {
         totalChapters++;
         totalClasses += chap.classes.length;
-        const chapCompletedClasses = chap.classes.filter(c => userState.completedClassIds.includes(c.id)).length;
+        const chapCompletedClasses = chap.classes.filter((c) => userState.completedClassIds.includes(c.id)).length;
         completedClasses += chapCompletedClasses;
 
         const prog = getChapterProgress(courseId, seg.id, chap.id);
@@ -292,10 +363,10 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const isChapterUnlocked = (courseId: string, segmentId: string, chapterId: string): { unlocked: boolean; reason?: string } => {
     const course = coursesData[courseId];
     if (!course) return { unlocked: true };
-    const segIndex = course.segments.findIndex(s => s.id === segmentId);
+    const segIndex = course.segments.findIndex((s) => s.id === segmentId);
     if (segIndex === -1) return { unlocked: true };
     const seg = course.segments[segIndex];
-    const chapIndex = seg.chapters.findIndex(c => c.id === chapterId);
+    const chapIndex = seg.chapters.findIndex((c) => c.id === chapterId);
     if (chapIndex === -1) return { unlocked: true };
     const chap = seg.chapters[chapIndex];
 
@@ -306,24 +377,36 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const prevChap = seg.chapters[chapIndex - 1];
       const prevProg = getChapterProgress(courseId, segmentId, prevChap.id);
       if (!prevProg.isCompleted) {
-        return { 
-          unlocked: false, 
-          reason: chap.unlockCondition || `Complete Chapter 0${prevChap.chapterNumber} (${prevChap.title}) to unlock this chapter.` 
+        return {
+          unlocked: false,
+          reason: chap.unlockCondition || `Complete Chapter 0${prevChap.chapterNumber} (${prevChap.title}) to unlock this chapter.`,
         };
       }
     } else if (segIndex > 0) {
       const prevSeg = course.segments[segIndex - 1];
       const prevSegProg = getSegmentProgress(courseId, prevSeg.id);
-      if (prevSegProg.completedChapters < prevSeg.totalChapters) {
+      if (prevSegProg.completedChapters < prevSeg.chapters.length) {
         return {
           unlocked: false,
-          reason: chap.unlockCondition || `Complete Segment 0${prevSeg.segmentNumber} (${prevSeg.title}) to unlock this chapter.`
+          reason: chap.unlockCondition || `Complete Segment 0${prevSeg.segmentNumber} (${prevSeg.title}) to unlock this chapter.`,
         };
       }
     }
 
     return { unlocked: true };
   };
+
+  const handleSetActivePlayingClass = useCallback(
+    (c: ChapterClass | null) => {
+      setActivePlayingClass(c);
+      if (c && accountId) {
+        const course = coursesData[activeCourseId];
+        const title = course ? `${course.title} — ${c.title}` : c.title;
+        trackRecentlyViewed({ id: c.id, type: 'class', courseId: activeCourseId, chapterId: activeChapterId, classId: c.id, title });
+      }
+    },
+    [accountId, coursesData, activeCourseId, activeChapterId, trackRecentlyViewed]
+  );
 
   return (
     <LearningContext.Provider
@@ -344,13 +427,14 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         navigateToChapter,
         navigateToCourse,
         continueLearning,
-        setActivePlayingClass,
+        setActivePlayingClass: handleSetActivePlayingClass,
         setActiveExam,
         setActivePdf,
         markClassCompleted,
         recordExamSubmission,
         markPdfViewed,
         enrollInCourse,
+        isCourseEnrolled,
         getCourseProgress,
         getSegmentProgress,
         getChapterProgress,

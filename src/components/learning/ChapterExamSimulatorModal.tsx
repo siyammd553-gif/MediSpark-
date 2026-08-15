@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { ChapterExam, Question } from '../../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { ChapterExam, Question, ExamAttempt, ExamType } from '../../types';
 import { useLearning } from '../../context/LearningContext';
+import { examApi, notifyExamAttemptsUpdated, beaconSubmitExam } from '../../utils/examApi';
 import { 
   X, 
   Clock, 
@@ -9,26 +10,31 @@ import {
   XCircle, 
   AlertCircle, 
   RotateCcw, 
-  ChevronRight, 
-  ChevronLeft,
+  ChevronRight,
   BookOpen,
   Check,
-  TrendingUp,
-  Sparkles
+  Lock,
+  Info
 } from 'lucide-react';
 
 interface ChapterExamSimulatorModalProps {
   exam: ChapterExam;
   chapterTitle: string;
+  courseId: string;
+  chapterId: string;
+  negativeMarking: number; // 0.25 for Medical Admission exams, 0 for HSC exams
   onClose: () => void;
 }
 
 export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps> = ({
   exam,
   chapterTitle,
+  courseId,
+  chapterId,
+  negativeMarking,
   onClose
 }) => {
-  const { recordExamSubmission, userState } = useLearning();
+  const { recordExamSubmission } = useLearning();
 
   // If questions array is empty, provide high-yield default questions
   const questions: Question[] = (exam.questions && exam.questions.length > 0) ? exam.questions : [
@@ -55,64 +61,149 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
   ];
 
   const totalQuestions = questions.length;
+  const totalSeconds = exam.durationMinutes * 60;
+  const examType: ExamType = negativeMarking > 0 ? 'medical' : 'hsc';
+  const subject = (questions[0]?.subject as string) || 'Biology';
+  const negLabel = negativeMarking > 0 ? `-${negativeMarking.toFixed(2)}` : 'No Negative';
+
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
   const [isSubmitted, setIsSubmitted] = useState<boolean>(false);
-  const [secondsRemaining, setSecondsRemaining] = useState<number>(exam.durationMinutes * 60);
-  const [showReviewList, setShowReviewList] = useState<boolean>(false);
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(totalSeconds);
+  const [result, setResult] = useState<ExamAttempt | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  // Timer countdown
+  // Refs keep latest values visible to timers / event handlers.
+  const secondsRef = useRef<number>(totalSeconds);
+  const answersRef = useRef<Record<number, number>>({});
+  const submittedRef = useRef<boolean>(false);
+  const isSubmittedRef = useRef<boolean>(false);
+  const startedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    answersRef.current = selectedAnswers;
+  }, [selectedAnswers]);
+  useEffect(() => {
+    isSubmittedRef.current = isSubmitted;
+  }, [isSubmitted]);
+
+  const buildStartPayload = () => ({
+    examId: exam.id,
+    examTitle: exam.examTitle,
+    courseId,
+    chapterId,
+    chapterTitle,
+    subject,
+    examType,
+    negativePerWrong: negativeMarking,
+    totalQuestions,
+    totalMarks: exam.totalMarks || totalQuestions,
+    durationMinutes: exam.durationMinutes,
+    questions,
+  });
+
+  // Register the active exam session server-side (belongs to the authenticated student).
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    examApi
+      .start(buildStartPayload())
+      .then((res) => {
+        if (res.previousFinalized) {
+          setNotice(`A previously interrupted exam (${res.previousFinalized.examTitle}) was auto-submitted and cannot be recovered.`);
+        }
+      })
+      .catch((e) => {
+        console.error('Failed to start exam session', e);
+        setNotice('Could not register this exam session. Please check your connection.');
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Timer countdown → auto-submit on expiry (interrupted exam is submitted).
   useEffect(() => {
     if (isSubmitted) return;
     const interval = setInterval(() => {
-      setSecondsRemaining(prev => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          handleSubmit();
-          return 0;
-        }
-        return prev - 1;
-      });
+      secondsRef.current = Math.max(0, secondsRef.current - 1);
+      setSecondsRemaining(secondsRef.current);
+      if (secondsRef.current <= 0) {
+        clearInterval(interval);
+        void handleSubmit('autosubmitted');
+      }
     }, 1000);
 
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSubmitted]);
 
-  const formatTimer = (totalSeconds: number) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
+  // Debounced live-sync of answers so a cross-device login can auto-submit them.
+  useEffect(() => {
+    if (isSubmitted) return;
+    if (Object.keys(selectedAnswers).length === 0) return;
+    const t = setTimeout(() => {
+      examApi.sync(selectedAnswers).catch(() => {});
+    }, 800);
+    return () => clearTimeout(t);
+  }, [selectedAnswers, isSubmitted]);
+
+  // Heartbeat sync every 15s (keeps the server snapshot fresh).
+  useEffect(() => {
+    if (isSubmitted) return;
+    const interval = setInterval(() => {
+      if (Object.keys(answersRef.current).length > 0) {
+        examApi.sync(answersRef.current).catch(() => {});
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [isSubmitted]);
+
+  // Interrupted exam (tab switch, close, refresh): auto-submit attempted answers.
+  useEffect(() => {
+    const fire = () => {
+      if (submittedRef.current || isSubmittedRef.current) return;
+      submittedRef.current = true;
+      beaconSubmitExam(totalSeconds - secondsRef.current);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') fire();
+    };
+    window.addEventListener('beforeunload', fire);
+    window.addEventListener('pagehide', fire);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', fire);
+      window.removeEventListener('pagehide', fire);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const formatTimer = (value: number) => {
+    const mins = Math.floor(value / 60);
+    const secs = value % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   const handleSelectOption = (optionIndex: number) => {
     if (isSubmitted) return;
+    // One answer per question — the selected answer cannot be changed.
+    if (selectedAnswers[currentQuestionIndex] !== undefined) return;
     setSelectedAnswers(prev => ({
       ...prev,
       [currentQuestionIndex]: optionIndex
     }));
   };
 
-  const handleSubmit = () => {
-    setIsSubmitted(true);
+  const handleSubmit = async (status: 'completed' | 'autosubmitted' = 'completed') => {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
+
+    const elapsed = totalSeconds - secondsRef.current;
     let correctCount = 0;
+    let wrongCount = 0;
+    let unattemptedCount = 0;
     questions.forEach((q, idx) => {
-      if (selectedAnswers[idx] === q.correctAnswerIndex) {
-        correctCount++;
-      }
-    });
-
-    const score = correctCount;
-    recordExamSubmission(exam.id, score, totalQuestions);
-  };
-
-  // Results calculation
-  let correctCount = 0;
-  let wrongCount = 0;
-  let unattemptedCount = 0;
-
-  if (isSubmitted) {
-    questions.forEach((q, idx) => {
-      const selected = selectedAnswers[idx];
+      const selected = answersRef.current[idx];
       if (selected === undefined) {
         unattemptedCount++;
       } else if (selected === q.correctAnswerIndex) {
@@ -121,10 +212,65 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
         wrongCount++;
       }
     });
-  }
 
-  const scorePercentage = Math.round((correctCount / totalQuestions) * 100);
+    // Local fallback scoring (the server remains the authoritative source).
+    const negativeDeduction = Number((wrongCount * negativeMarking).toFixed(2));
+    const finalScore = Math.max(0, Number((correctCount - negativeDeduction).toFixed(2)));
+
+    try {
+      const res = await examApi.submit(elapsed, status);
+      setResult(res.attempt);
+      recordExamSubmission(exam.id, res.attempt.finalScore, res.attempt.totalMarks || totalQuestions);
+      notifyExamAttemptsUpdated();
+    } catch (e) {
+      console.error('Failed to record exam attempt', e);
+      setNotice('Your result could not be saved to your account. Please check your connection.');
+      recordExamSubmission(exam.id, finalScore, totalQuestions);
+    } finally {
+      setIsSubmitted(true);
+    }
+  };
+
+  const handleClose = () => {
+    if (!submittedRef.current) {
+      void handleSubmit('autosubmitted').finally(onClose);
+    } else {
+      onClose();
+    }
+  };
+
+  const handleRetake = () => {
+    submittedRef.current = false;
+    setSelectedAnswers({});
+    answersRef.current = {};
+    setCurrentQuestionIndex(0);
+    setSecondsRemaining(totalSeconds);
+    secondsRef.current = totalSeconds;
+    setResult(null);
+    setIsSubmitted(false);
+    setNotice(null);
+    examApi
+      .start(buildStartPayload())
+      .then((res) => {
+        if (res.previousFinalized) {
+          setNotice(`A previously interrupted exam (${res.previousFinalized.examTitle}) was auto-submitted and cannot be recovered.`);
+        }
+      })
+      .catch((e) => {
+        console.error('Failed to restart exam session', e);
+        setNotice('Could not register this exam session. Please check your connection.');
+      });
+  };
+
+  // Results derived from the server-recorded attempt when available.
+  const correctCount = result?.correctCount ?? 0;
+  const wrongCount = result?.wrongCount ?? 0;
+  const unattemptedCount = result?.unattemptedCount ?? 0;
+  const negativeDeduction = result?.negativeDeduction ?? 0;
+  const finalScore = result?.finalScore ?? 0;
+  const scorePercentage = result?.accuracy ?? (totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0);
   const currentQ = questions[currentQuestionIndex];
+  const answeredCount = Object.keys(selectedAnswers).length;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 lg:p-6 overflow-y-auto">
@@ -143,6 +289,13 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
               <span className="text-xs text-gray-400 truncate">
                 {chapterTitle}
               </span>
+              <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                examType === 'medical'
+                  ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                  : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+              }`}>
+                {examType === 'medical' ? `Negative -${negativeMarking.toFixed(2)}` : 'HSC · No Negative'}
+              </span>
             </div>
             <h3 className="text-sm sm:text-base font-bold text-white truncate">
               {exam.examTitle}
@@ -157,12 +310,12 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
               </div>
             ) : (
               <span className="text-xs font-black text-emerald-400 bg-emerald-400/10 px-3 py-1.5 rounded-xl border border-emerald-400/30">
-                Score: {correctCount} / {totalQuestions}
+                Score: {finalScore} / {result?.totalMarks || totalQuestions}
               </span>
             )}
 
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="p-2 text-gray-400 hover:text-white rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
             >
               <X className="w-5 h-5" />
@@ -173,6 +326,14 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 no-scrollbar">
           
+          {/* Notice (e.g. auto-submitted previous interrupted exam) */}
+          {notice && (
+            <div className="flex items-start gap-2.5 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs font-semibold animate-in fade-in">
+              <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <span>{notice}</span>
+            </div>
+          )}
+
           {/* If Result View is Active */}
           {isSubmitted ? (
             <div className="space-y-6 animate-in fade-in duration-300">
@@ -190,13 +351,18 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
                   <p className="text-xs sm:text-sm text-gray-400">
                     Accuracy & Score Analysis for {exam.examTitle}
                   </p>
+                  {result?.status === 'autosubmitted' && (
+                    <p className="text-[11px] text-amber-400 font-bold mt-1">
+                      Auto-submitted (interrupted) — this attempt cannot be recovered.
+                    </p>
+                  )}
                 </div>
 
                 {/* Score Stats Grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl mx-auto pt-2">
                   <div className="bg-white/5 border border-white/5 rounded-xl p-3">
                     <span className="text-[10px] text-gray-400 uppercase font-bold block">Score</span>
-                    <span className="text-lg sm:text-xl font-black text-white">{correctCount} / {totalQuestions}</span>
+                    <span className="text-lg sm:text-xl font-black text-white">{finalScore} / {result?.totalMarks || totalQuestions}</span>
                   </div>
                   <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
                     <span className="text-[10px] text-emerald-400 uppercase font-bold block">Correct</span>
@@ -212,14 +378,23 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
                   </div>
                 </div>
 
+                {/* Negative marking summary */}
+                <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold ${
+                  negativeMarking > 0
+                    ? 'bg-red-500/10 text-red-300 border border-red-500/30'
+                    : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
+                }`}>
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  <span>
+                    {negativeMarking > 0
+                      ? `Negative Marking Deduction: -${negativeDeduction.toFixed(2)} (${negativeMarking.toFixed(2)} per wrong answer)`
+                      : 'HSC Exam — No Negative Marking Applied'}
+                  </span>
+                </div>
+
                 <div className="pt-2 flex items-center justify-center gap-3">
                   <button
-                    onClick={() => {
-                      setSelectedAnswers({});
-                      setIsSubmitted(false);
-                      setSecondsRemaining(exam.durationMinutes * 60);
-                      setCurrentQuestionIndex(0);
-                    }}
+                    onClick={handleRetake}
                     className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-2"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
@@ -234,7 +409,7 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
                 </div>
               </div>
 
-              {/* Detailed Solutions & Explanations List */}
+              {/* Detailed Solutions & Explanations List (answer script after submission) */}
               <div className="space-y-4">
                 <h4 className="text-sm font-bold text-white flex items-center gap-2">
                   <BookOpen className="w-4 h-4 text-[#E50914]" />
@@ -272,7 +447,7 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
                             </span>
                           ) : (
                             <span className="text-xs font-bold text-red-400 flex items-center gap-1">
-                              <XCircle className="w-3.5 h-3.5" /> Incorrect (-0.25)
+                              <XCircle className="w-3.5 h-3.5" /> Incorrect ({negLabel})
                             </span>
                           )}
                         </div>
@@ -305,7 +480,7 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
                           })}
                         </div>
 
-                        {/* Explanation Box */}
+                        {/* Explanation Box (kept after submission) */}
                         {q.explanation && (
                           <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-xs text-gray-300 space-y-1">
                             <span className="font-bold text-[#FF3540] block">Doctor's Explanation & Reference:</span>
@@ -323,29 +498,25 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
             /* Active Test Taking View */
             <div className="space-y-6">
               
-              {/* Question Navigation Palette */}
-              <div className="flex items-center gap-1.5 flex-wrap p-3 rounded-xl bg-white/5 border border-white/5">
-                <span className="text-[11px] font-bold text-gray-400 mr-2">Jump to:</span>
-                {questions.map((_, idx) => {
-                  const isCurrent = currentQuestionIndex === idx;
-                  const isAnswered = selectedAnswers[idx] !== undefined;
-
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => setCurrentQuestionIndex(idx)}
-                      className={`w-7 h-7 rounded-lg text-xs font-bold transition-all ${
-                        isCurrent
-                          ? 'bg-[#E50914] text-white shadow'
-                          : isAnswered
-                          ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
-                          : 'bg-black/40 text-gray-400 hover:text-white border border-white/5'
-                      }`}
-                    >
-                      {idx + 1}
-                    </button>
-                  );
-                })}
+              {/* Exam Rules + Progress Indicator */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-white/5 border border-white/5">
+                <div className="flex items-center gap-2 text-[11px] text-gray-400">
+                  <Lock className="w-3.5 h-3.5 text-[#FF3540]" />
+                  <span>
+                    Answers lock once selected — you cannot go back to a previous question.
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] font-bold text-gray-300">
+                    {answeredCount} / {totalQuestions} Answered
+                  </span>
+                  <div className="w-28 h-1.5 bg-black/40 rounded-full overflow-hidden border border-white/5">
+                    <div
+                      className="h-full bg-gradient-to-r from-[#E50914] to-[#FF3540] rounded-full transition-all duration-300"
+                      style={{ width: `${totalQuestions > 0 ? Math.round((answeredCount / totalQuestions) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Active Question Box */}
@@ -365,19 +536,22 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
                   {currentQ.question}
                 </h4>
 
-                {/* 4 Interactive MCQ Options */}
+                {/* 4 Interactive MCQ Options (locked once answered) */}
                 <div className="space-y-2.5 pt-2">
                   {currentQ.options.map((option, optIdx) => {
                     const isSelected = selectedAnswers[currentQuestionIndex] === optIdx;
+                    const isLocked = selectedAnswers[currentQuestionIndex] !== undefined;
 
                     return (
                       <div
                         key={optIdx}
                         onClick={() => handleSelectOption(optIdx)}
-                        className={`p-3.5 sm:p-4 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                        className={`p-3.5 sm:p-4 rounded-xl border transition-all flex items-center justify-between gap-3 ${
                           isSelected
                             ? 'bg-[#E50914]/20 border-[#E50914] text-white shadow-md'
-                            : 'bg-white/5 border-white/5 hover:border-white/20 text-gray-300 hover:text-white'
+                            : isLocked
+                            ? 'bg-black/30 border-white/5 text-gray-500 cursor-not-allowed'
+                            : 'bg-white/5 border-white/5 hover:border-white/20 text-gray-300 hover:text-white cursor-pointer'
                         }`}
                       >
                         <div className="flex items-center gap-3">
@@ -391,31 +565,32 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
                           </span>
                         </div>
 
-                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                          isSelected ? 'border-[#E50914] bg-[#E50914]' : 'border-gray-500'
-                        }`}>
-                          {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                        </div>
+                        {isSelected ? (
+                          <Lock className="w-4 h-4 text-[#FF3540] shrink-0" />
+                        ) : (
+                          <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                            isSelected ? 'border-[#E50914] bg-[#E50914]' : 'border-gray-500'
+                          }`}>
+                            {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Bottom Nav Buttons */}
+              {/* Bottom Nav Buttons (forward-only navigation) */}
               <div className="flex items-center justify-between gap-4 pt-2">
-                <button
-                  disabled={currentQuestionIndex === 0}
-                  onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
-                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:pointer-events-none text-xs font-bold text-white transition-colors flex items-center gap-1.5"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                  <span>Previous</span>
-                </button>
+                <div className="text-[11px] text-gray-500 font-medium">
+                  {currentQuestionIndex > 0 && (
+                    <span>Locked — earlier questions cannot be revisited.</span>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={handleSubmit}
+                    onClick={() => void handleSubmit('completed')}
                     className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold shadow transition-all"
                   >
                     Submit Exam
@@ -431,7 +606,7 @@ export const ChapterExamSimulatorModal: React.FC<ChapterExamSimulatorModalProps>
                     </button>
                   ) : (
                     <button
-                      onClick={handleSubmit}
+                      onClick={() => void handleSubmit('completed')}
                       className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold transition-all"
                     >
                       Finish Test

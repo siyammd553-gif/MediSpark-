@@ -6,6 +6,7 @@ import { ClassVideoPlayerModal } from './ClassVideoPlayerModal';
 import { ChapterExamSimulatorModal } from './ChapterExamSimulatorModal';
 import { ChapterPdfReaderModal } from './ChapterPdfReaderModal';
 import { ChapterMoreTab } from './ChapterMoreTab';
+import { CourseAccessDenied } from './CourseAccessDenied';
 import { 
   ArrowLeft, 
   Menu, 
@@ -27,9 +28,11 @@ import {
 
 interface ChapterLearningPageProps {
   onNavigate: (page: PageView) => void;
+  isAuthenticated?: boolean;
+  onOpenAuth?: () => void;
 }
 
-export const ChapterLearningPage: React.FC<ChapterLearningPageProps> = ({ onNavigate }) => {
+export const ChapterLearningPage: React.FC<ChapterLearningPageProps> = ({ onNavigate, isAuthenticated, onOpenAuth }) => {
   const { 
     coursesData, 
     activeCourseId, 
@@ -47,11 +50,15 @@ export const ChapterLearningPage: React.FC<ChapterLearningPageProps> = ({ onNavi
   const [selectedExam, setSelectedExam] = useState<ChapterExam | null>(null);
   const [selectedPdf, setSelectedPdf] = useState<ChapterPDF | null>(null);
 
-  const course = coursesData[activeCourseId] || coursesData['hsc-28-complete-biology'];
-  const segment = course.segments.find(s => s.id === activeSegmentId) || course.segments[0];
+  const course = coursesData[activeCourseId];
+  const segment = course?.segments.find(s => s.id === activeSegmentId) || course?.segments[0];
   const chapter = segment?.chapters.find(c => c.id === activeChapterId) || segment?.chapters[0];
 
   if (!course || !segment || !chapter) {
+    // Distinguish a missing/unenrolled course from a bad chapter position.
+    if (!course) {
+      return <CourseAccessDenied onNavigate={onNavigate} />;
+    }
     return (
       <div className="min-h-screen bg-[#090909] text-white flex items-center justify-center p-6">
         <div className="text-center space-y-4">
@@ -413,7 +420,13 @@ export const ChapterLearningPage: React.FC<ChapterLearningPageProps> = ({ onNavi
                       </div>
 
                       <button
-                        onClick={() => setSelectedExam(exam)}
+                        onClick={() => {
+                          if (!isAuthenticated) {
+                            onOpenAuth?.();
+                            return;
+                          }
+                          setSelectedExam(exam);
+                        }}
                         className="w-full py-2.5 px-4 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black border border-amber-500/40 text-xs font-extrabold rounded-xl transition-all flex items-center justify-center gap-2"
                       >
                         <Award className="w-3.5 h-3.5" />
@@ -509,6 +522,9 @@ export const ChapterLearningPage: React.FC<ChapterLearningPageProps> = ({ onNavi
         <ChapterExamSimulatorModal
           exam={selectedExam}
           chapterTitle={chapter.title}
+          courseId={course.courseId}
+          chapterId={chapter.id}
+          negativeMarking={course.negativeMarking ?? 0}
           onClose={() => setSelectedExam(null)}
         />
       )}

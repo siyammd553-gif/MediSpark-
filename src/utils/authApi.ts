@@ -1,3 +1,5 @@
+import { StudentDashboardData } from '../types';
+
 export type UserRole = 'student' | 'teacher' | 'admin';
 
 export interface AuthUser {
@@ -27,6 +29,22 @@ export interface StudentProfileRecord {
   targetMedicalCollege: string;
   enrolledCoursesCount: number;
   streakDays: number;
+  streakActiveToday?: boolean;
+  rank?: number;
+  totalStudents?: number;
+  overallScore?: number;
+  meritPercentile?: number;
+  completedClasses?: number;
+  totalClasses?: number;
+  weeklyStreak?: { day: string; studied: boolean; hours: number }[];
+  todayStudyTarget?: {
+    targetMinutes: number;
+    completedMinutes: number;
+    topics: { id: string; title: string; subject: string; done: boolean }[];
+  };
+  upcomingLiveClasses?: unknown[];
+  weakTopics?: unknown[];
+  dashboard?: StudentDashboardData;
   updatedAt: string;
 }
 
@@ -59,6 +77,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
   return data as T;
 }
+
+export { request as apiRequest };
 
 export const authApi = {
   me: () => request<{ user: AuthUser }>('/api/auth/me'),
@@ -118,6 +138,15 @@ export const authApi = {
     request<{ accountId: string; studentId: string; role: UserRole; record: StudentProfileRecord | null }>(
       '/api/student/records'
     ),
+
+  getStudentDashboard: () =>
+    request<{ profile: StudentProfileRecord; account: AuthUser }>('/api/student/dashboard'),
+
+  updateStudentDashboard: (patch: Partial<StudentDashboardData>) =>
+    request<{ profile: StudentProfileRecord; dashboard: StudentDashboardData }>('/api/student/dashboard', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
 
   adminListUsers: () => request<{ total: number; users: AuthUser[] }>('/api/admin/users'),
 

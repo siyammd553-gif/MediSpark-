@@ -4,6 +4,7 @@ import { PageView, Chapter, ChapterClass, ChapterExam, ChapterPDF } from '../../
 import { ClassVideoPlayerModal } from './ClassVideoPlayerModal';
 import { ChapterExamSimulatorModal } from './ChapterExamSimulatorModal';
 import { ChapterPdfReaderModal } from './ChapterPdfReaderModal';
+import { CourseAccessDenied } from './CourseAccessDenied';
 import { 
   ChevronDown, 
   ChevronRight, 
@@ -46,10 +47,14 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
     userState
   } = useLearning();
 
-  const course = coursesData[activeCourseId] || coursesData['hsc-28-complete-biology'];
-  const courseProgress = getCourseProgress(course.courseId);
+  const course = coursesData[activeCourseId];
+  const courseProgress = course
+    ? getCourseProgress(course.courseId)
+    : { percentage: 0, completedChapters: 0, totalChapters: 0, completedClasses: 0, totalClasses: 0 };
 
-  const isBiologyCourse = course.courseId.toLowerCase().includes('biology') || course.title.toLowerCase().includes('biology');
+  const isBiologyCourse = course
+    ? course.courseId.toLowerCase().includes('biology') || course.title.toLowerCase().includes('biology')
+    : false;
 
   // Branch Selection: Botany or Zoology (default to Botany for biology courses)
   const [selectedBranch, setSelectedBranch] = useState<'Botany' | 'Zoology'>('Botany');
@@ -68,6 +73,7 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
 
   // Find the segment for the selected branch
   const currentSegment = useMemo(() => {
+    if (!course) return undefined;
     if (!isBiologyCourse) return course.segments[0];
     return course.segments.find(s => 
       selectedBranch === 'Botany' 
@@ -100,6 +106,11 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
     setActiveTab(tab);
     onNavigate('chapter-learning');
   };
+
+  // Access check: this student has not enrolled in the active course.
+  if (!course) {
+    return <CourseAccessDenied onNavigate={onNavigate} />;
+  }
 
   return (
     <div id="medispark-course-overview-page" className="min-h-screen bg-[#090909] text-white py-6 sm:py-8">

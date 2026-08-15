@@ -1,30 +1,75 @@
 import { useState, useEffect } from 'react';
-import { INITIAL_STUDENT_PROFILE } from '../data/mockData';
-import { StudentProfile } from '../types';
+import { StudentProfile, UpcomingClass, WeakTopic, StudentDashboardData } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { authApi, StudentProfileRecord } from './authApi';
 
 const STUDENT_AVATAR_STORAGE_KEY = 'medispark_custom_student_avatar_v1';
-const STUDENT_PROFILE_STORAGE_KEY = 'medispark_custom_student_profile_v1';
 const STUDENT_AVATAR_UPDATE_EVENT = 'medispark_student_avatar_updated';
-const STUDENT_PROFILE_UPDATE_EVENT = 'medispark_student_profile_updated';
+
+const DEFAULT_AVATAR =
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80';
+
+const EMPTY_STUDENT_PROFILE: StudentProfile = {
+  id: '',
+  name: '',
+  avatar: DEFAULT_AVATAR,
+  email: '',
+  phone: '',
+  batch: '',
+  college: '',
+  targetMedicalCollege: '',
+  enrolledCoursesCount: 0,
+  streakDays: 0,
+  streakActiveToday: false,
+  weeklyStreak: [],
+  todayStudyTarget: { targetMinutes: 0, completedMinutes: 0, topics: [] },
+  rank: 0,
+  totalStudents: 0,
+  overallScore: 0,
+  meritPercentile: 0,
+  completedClasses: 0,
+  totalClasses: 0,
+  upcomingLiveClasses: [],
+  recentMockResults: [],
+  weakTopics: [],
+  notifications: [],
+};
 
 // All per-student records are namespaced by the authenticated Student Account ID.
 function scopedKey(baseKey: string, accountId: string | null): string {
   return accountId ? `${baseKey}_${accountId}` : baseKey;
 }
 
-function serverRecordToProfile(record: StudentProfileRecord | null): Partial<StudentProfile> {
-  if (!record) return {};
+// Build the full StudentProfile ONLY from the authenticated student's own
+// server record + per-account dashboard data. No hardcoded/demo student data.
+function buildStudentProfile(
+  record: StudentProfileRecord | null,
+  dashboard: StudentDashboardData | null
+): StudentProfile {
   return {
-    id: record.studentId,
-    name: record.name,
-    email: record.email,
-    phone: record.phone,
-    batch: record.batch,
-    college: record.college,
-    avatar: record.avatar || INITIAL_STUDENT_PROFILE.avatar,
-    targetMedicalCollege: record.targetMedicalCollege || INITIAL_STUDENT_PROFILE.targetMedicalCollege,
+    id: record?.studentId || '',
+    name: record?.name || '',
+    avatar: record?.avatar || '',
+    email: record?.email || '',
+    phone: record?.phone || '',
+    batch: record?.batch || '',
+    college: record?.college || '',
+    targetMedicalCollege: record?.targetMedicalCollege || '',
+    enrolledCoursesCount: record?.enrolledCoursesCount ?? 0,
+    streakDays: record?.streakDays ?? 0,
+    streakActiveToday: record?.streakActiveToday ?? false,
+    weeklyStreak: record?.weeklyStreak ?? [],
+    todayStudyTarget: record?.todayStudyTarget ?? { targetMinutes: 0, completedMinutes: 0, topics: [] },
+    rank: record?.rank ?? 0,
+    totalStudents: record?.totalStudents ?? 0,
+    overallScore: record?.overallScore ?? 0,
+    meritPercentile: record?.meritPercentile ?? 0,
+    completedClasses: record?.completedClasses ?? 0,
+    totalClasses: record?.totalClasses ?? 0,
+    upcomingLiveClasses: (record?.upcomingLiveClasses as UpcomingClass[]) ?? [],
+    recentMockResults: dashboard?.examResults ?? [],
+    weakTopics: (record?.weakTopics as WeakTopic[]) ?? [],
+    notifications: dashboard?.notifications ?? [],
   };
 }
 
@@ -55,29 +100,7 @@ export function resetStudentAvatar(accountId: string | null = null) {
   }
 }
 
-export function getStoredStudentProfile(accountId: string | null = null): Partial<StudentProfile> {
-  try {
-    const raw = localStorage.getItem(scopedKey(STUDENT_PROFILE_STORAGE_KEY, accountId));
-    if (!raw) return {};
-    return JSON.parse(raw);
-  } catch (e) {
-    console.error('Failed to parse student profile from storage', e);
-    return {};
-  }
-}
-
-export function saveStoredStudentProfile(updatedFields: Partial<StudentProfile>, accountId: string | null = null) {
-  try {
-    const current = getStoredStudentProfile(accountId);
-    const merged = { ...current, ...updatedFields };
-    localStorage.setItem(scopedKey(STUDENT_PROFILE_STORAGE_KEY, accountId), JSON.stringify(merged));
-    window.dispatchEvent(new CustomEvent(STUDENT_PROFILE_UPDATE_EVENT, { detail: merged }));
-  } catch (e) {
-    console.error('Failed to save student profile to storage', e);
-  }
-}
-
-export function useStudentAvatar(defaultAvatar: string = INITIAL_STUDENT_PROFILE.avatar): {
+export function useStudentAvatar(defaultAvatar: string = DEFAULT_AVATAR): {
   avatarUrl: string;
   isCustom: boolean;
   updateAvatar: (newUrl: string) => void;
@@ -123,56 +146,16 @@ export function useStudentAvatar(defaultAvatar: string = INITIAL_STUDENT_PROFILE
   };
 }
 
-export function useStudentProfile(initialProfile: StudentProfile = INITIAL_STUDENT_PROFILE) {
-  const { accountId, profile: serverProfile } = useAuth();
-  const { avatarUrl } = useStudentAvatar(initialProfile.avatar);
-  const [profile, setProfile] = useState<StudentProfile>(() => {
-    const custom = getStoredStudentProfile(accountId);
-    return {
-      ...initialProfile,
-      ...serverRecordToProfile(serverProfile),
-      ...custom,
-      avatar: getCustomStudentAvatar(accountId) || custom.avatar || serverProfile?.avatar || initialProfile.avatar,
-    };
-  });
+export function useStudentProfile(initialProfile: StudentProfile = EMPTY_STUDENT_PROFILE) {
+  const { accountId, profile: serverProfile, dashboard, updateProfile: syncProfile } = useAuth();
+  const { avatarUrl } = useStudentAvatar(serverProfile?.avatar || initialProfile.avatar);
+  const [custom, setCustom] = useState<Partial<StudentProfile>>({});
 
-  useEffect(() => {
-    const custom = getStoredStudentProfile(accountId);
-    setProfile((prev) => ({
-      ...initialProfile,
-      ...serverRecordToProfile(serverProfile),
-      ...custom,
-      avatar: getCustomStudentAvatar(accountId) || custom.avatar || serverProfile?.avatar || initialProfile.avatar,
-    }));
-  }, [accountId, serverProfile, initialProfile]);
-
-  useEffect(() => {
-    const handleProfileUpdate = () => {
-      const custom = getStoredStudentProfile(accountId);
-      const currentAvatar = getCustomStudentAvatar(accountId) || custom.avatar || serverProfile?.avatar || initialProfile.avatar;
-      setProfile((prev) => ({
-        ...prev,
-        ...serverRecordToProfile(serverProfile),
-        ...custom,
-        avatar: currentAvatar,
-      }));
-    };
-
-    window.addEventListener(STUDENT_PROFILE_UPDATE_EVENT, handleProfileUpdate);
-    window.addEventListener(STUDENT_AVATAR_UPDATE_EVENT, handleProfileUpdate);
-    window.addEventListener('storage', handleProfileUpdate);
-
-    return () => {
-      window.removeEventListener(STUDENT_PROFILE_UPDATE_EVENT, handleProfileUpdate);
-      window.removeEventListener(STUDENT_AVATAR_UPDATE_EVENT, handleProfileUpdate);
-      window.removeEventListener('storage', handleProfileUpdate);
-    };
-  }, [accountId, serverProfile, initialProfile]);
+  const base = buildStudentProfile(serverProfile, dashboard);
 
   const updateProfile = (updatedFields: Partial<StudentProfile>) => {
-    saveStoredStudentProfile(updatedFields, accountId);
-    setProfile((prev) => ({ ...prev, ...updatedFields }));
-    // Sync identity fields to the student's server-side record (keyed by Account ID)
+    setCustom((prev) => ({ ...prev, ...updatedFields }));
+    // Sync identity fields to the student's own server-side record (keyed by Account ID)
     if (accountId) {
       const serverFields: Partial<StudentProfileRecord> = {};
       for (const field of ['name', 'email', 'phone', 'batch', 'college', 'avatar', 'targetMedicalCollege'] as const) {
@@ -181,7 +164,7 @@ export function useStudentProfile(initialProfile: StudentProfile = INITIAL_STUDE
         }
       }
       if (Object.keys(serverFields).length > 0) {
-        authApi.updateStudentProfile(serverFields).catch((e) => {
+        syncProfile(serverFields).catch((e) => {
           console.error('Failed to sync profile to server record', e);
         });
       }
@@ -190,10 +173,10 @@ export function useStudentProfile(initialProfile: StudentProfile = INITIAL_STUDE
 
   return {
     profile: {
-      ...profile,
+      ...base,
+      ...custom,
       avatar: avatarUrl,
     },
     updateProfile,
   };
 }
-

@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { PageView } from '../../types';
-import { INITIAL_STUDENT_PROFILE } from '../../data/mockData';
 import { StudentProfileSection } from './StudentProfileSection';
 import { MyEnrolledCoursesSection } from './MyEnrolledCoursesSection';
 import { ExamResultAndLeaderboardSection } from './ExamResultAndLeaderboardSection';
@@ -33,7 +32,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onNavigate,
   onDownloadResource,
 }) => {
-  const { profile, updateProfile } = useStudentProfile(INITIAL_STUDENT_PROFILE);
+  const { profile, updateProfile } = useStudentProfile();
   const { totalCount: totalFavorites } = useFavorites();
   const { accountId, studentId, role, isAuthenticated } = useAuth();
   

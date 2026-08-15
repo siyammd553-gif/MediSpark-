@@ -216,6 +216,7 @@ export interface EnrolledCourseData {
   totalPdfs: number;
   completedChaptersCount: number;
   progressPercentage: number;
+  negativeMarking?: number; // 0.25 for Medical Admission courses, 0 for HSC
   segments: CourseSegment[];
 }
 
@@ -364,6 +365,45 @@ export interface Question {
   difficulty: 'Easy' | 'Medium' | 'Hard';
 }
 
+export type ExamType = 'medical' | 'hsc';
+
+export interface ExamAttempt {
+  id: string;
+  examId: string;
+  examTitle: string;
+  courseId: string;
+  chapterId: string;
+  chapterTitle: string;
+  subject: string;
+  examType: ExamType;
+  totalQuestions: number;
+  totalMarks: number;
+  correctCount: number;
+  wrongCount: number;
+  unattemptedCount: number;
+  negativePerWrong: number;
+  negativeDeduction: number;
+  finalScore: number;
+  accuracy: number;
+  submittedInSeconds: number;
+  status: 'completed' | 'autosubmitted';
+  submittedAt: string;
+  answers: Record<string, number>;
+}
+
+export interface LeaderboardEntry {
+  accountId: string;
+  studentId: string;
+  name: string;
+  college: string;
+  avatar: string;
+  targetMedicalCollege: string;
+  merit: number;
+  totalTimeSeconds: number;
+  attemptsCount: number;
+  lastAttemptAt: string;
+}
+
 export interface LeaderboardUser {
   rank: number;
   name: string;
@@ -382,6 +422,91 @@ export interface NotificationItem {
   timestamp: string;
   read: boolean;
   type: 'live' | 'exam' | 'result' | 'announcement';
+}
+
+// ==========================================
+// FAVOURITES / SAVED VAULT TYPES
+// ==========================================
+
+export interface FavoriteClassItem {
+  id: string;
+  type: 'class';
+  title: string;
+  courseTitle: string;
+  subject: string;
+  chapter: string;
+  mentorName: string;
+  duration: string;
+  thumbnail: string;
+  dateAdded: string;
+  videoUrl?: string;
+  courseId?: string;
+  segmentId?: string;
+  chapterId?: string;
+}
+
+export interface FavoriteDocumentItem {
+  id: string;
+  type: 'document';
+  title: string;
+  subject: string;
+  category: string;
+  pages: number;
+  fileSize: string;
+  fileType: string;
+  downloadCount: number;
+  dateAdded: string;
+  badge?: string;
+}
+
+export interface FavoriteExamResultItem {
+  id: string;
+  type: 'result';
+  examTitle: string;
+  subject: string;
+  score: number;
+  totalMarks: number;
+  negativeMarks: number;
+  rank: number;
+  totalParticipants: number;
+  date: string;
+  dateAdded: string;
+  accuracy: number;
+  keyWeakness?: string;
+}
+
+export type FavoriteItem = FavoriteClassItem | FavoriteDocumentItem | FavoriteExamResultItem;
+
+export interface StudentFavoritesStore {
+  classes: FavoriteClassItem[];
+  documents: FavoriteDocumentItem[];
+  results: FavoriteExamResultItem[];
+}
+
+// ==========================================
+// PER-STUDENT DASHBOARD DATA (keyed by Account ID)
+// ==========================================
+
+export interface RecentlyViewedItem {
+  id: string;
+  type: 'class' | 'chapter' | 'course';
+  courseId: string;
+  chapterId?: string;
+  classId?: string;
+  title: string;
+  viewedAt: string;
+}
+
+export interface StudentDashboardData {
+  enrolledCourseIds: string[];
+  completedClassIds: string[];
+  completedExamIds: Record<string, { bestScore: number; lastScore: number; attempts: number; timestamp: string }>;
+  viewedPdfIds: string[];
+  lastActivePosition: ActiveLearningPosition | null;
+  recentlyViewed: RecentlyViewedItem[];
+  favorites: StudentFavoritesStore;
+  examResults: MockResult[];
+  notifications: NotificationItem[];
 }
 
 export interface DownloadableResource {

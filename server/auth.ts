@@ -17,8 +17,10 @@ import {
   saveStudentRecord,
   updateUserPassword,
   StudentRecord,
-  hashToken,
+hashToken,
   normalizePhone,
+  finalizeActiveExam,
+  backfillDemoStudentEnrollments,
 } from './store';
 import { issueOtp, verifyOtp, checkSendAllowed } from './otp';
 import { isSmsConfigured, sendSms } from './sms';
@@ -243,6 +245,9 @@ export function seedAccounts() {
     }
     console.log(`[auth] Seeded ${user.role} account: ${user.email} (${accountId})`);
   }
+
+  // Give the demo student account its own seeded enrollments (per-account).
+  backfillDemoStudentEnrollments();
 }
 
 // ---------------------------------------------------------------
@@ -511,12 +516,34 @@ authRouter.post('/login', (req, res) => {
 
   clearLoginAttempts(req, identifier);
   issueSession(res, user, remember !== false);
-  res.json({ user: sanitizeUser(user), message: `Welcome back, ${user.name}!` });
+
+  // Login from another device during an active exam: automatically submit the
+  // previous exam (score + record it server-side, then clear the session).
+  const previousAttempt = finalizeActiveExam(user.accountId, 0, 'autosubmitted');
+
+  res.json({
+    user: sanitizeUser(user),
+    message: `Welcome back, ${user.name}!`,
+    ...(previousAttempt
+      ? {
+          activeExamFinalized: {
+            examTitle: previousAttempt.examTitle,
+            finalScore: previousAttempt.finalScore,
+            totalMarks: previousAttempt.totalMarks,
+          },
+        }
+      : {}),
+  });
 });
 
 // Logout: destroys the current session server-side and clears the cookie
 authRouter.post('/logout', (req, res) => {
   revokeSession(req, res);
+  // Any in-progress exam is treated as interrupted and auto-submitted.
+  const user = getAuthenticatedUser(req);
+  if (user) {
+    finalizeActiveExam(user.accountId, 0, 'autosubmitted');
+  }
   res.json({ message: 'Logged out successfully.' });
 });
 

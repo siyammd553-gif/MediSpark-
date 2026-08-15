@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { PageView, Course } from './types';
 import { COURSES_DATA } from './data/mockData';
 import { ThemeProvider } from './context/ThemeContext';
@@ -36,15 +36,32 @@ import { AboutPage } from './pages/AboutPage';
 import { ContactPage } from './pages/ContactPage';
 
 export function AppContent() {
-  const [currentPage, setCurrentPage] = useState<PageView>('dashboard');
+  const [currentPage, setCurrentPage] = useState<PageView>('home');
   const [isNavDrawerOpen, setIsNavDrawerOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [selectedCourseForPayment, setSelectedCourseForPayment] = useState<Course | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const hasRouted = useRef(false);
 
-  const { user, isAuthenticated, isReady, role, logout } = useAuth();
+  const { user, profile, isAuthenticated, isReady, role, dashboard, hasActiveCourse, logout } = useAuth();
   const { enrollInCourse, navigateToCourse } = useLearning();
+
+  // Landing-route decision, resolved once auth + the student's dashboard are loaded:
+  // - Authenticated student WITHOUT an active enrolled course -> Home
+  // - Authenticated student WITH an active enrolled course  -> Dashboard
+  // - Everyone else (guest / teacher / admin)               -> Home
+  useEffect(() => {
+    if (!isReady) return;
+    if (role === 'student' && dashboard === null) return; // still loading per-student data
+    if (hasRouted.current) return;
+    hasRouted.current = true;
+    if (isAuthenticated && role === 'student') {
+      setCurrentPage(hasActiveCourse ? 'dashboard' : 'home');
+    } else {
+      setCurrentPage('home');
+    }
+  }, [isReady, isAuthenticated, role, dashboard, hasActiveCourse]);
 
   // Scroll to top on page navigate
   const handleNavigate = (page: PageView) => {
@@ -64,6 +81,12 @@ export function AppContent() {
   };
 
   const handleEnrollCourse = (course: Course) => {
+    // Enrollment is tied to the authenticated student's account.
+    if (!isAuthenticated || role !== 'student') {
+      triggerToast('🔒 Please log in to enroll in a course.');
+      setIsAuthModalOpen(true);
+      return;
+    }
     if (course.isFree || course.price === 0) {
       enrollInCourse(course.id);
       navigateToCourse(course.id);
@@ -78,6 +101,10 @@ export function AppContent() {
   };
 
   const handlePaymentSuccess = (course: Course) => {
+    if (!isAuthenticated || role !== 'student') {
+      setIsAuthModalOpen(true);
+      return;
+    }
     enrollInCourse(course.id);
     navigateToCourse(course.id);
     triggerToast(`🎉 Successfully enrolled in ${course.title}!`);
@@ -88,8 +115,12 @@ export function AppContent() {
 
   const handleLogout = async () => {
     await logout();
+    hasRouted.current = false;
+    setCurrentPage('home');
     triggerToast('👋 Logged out. Your session has been securely closed.');
   };
+
+  const unreadNotificationsCount = (dashboard?.notifications ?? []).filter((n) => !n.read).length;
 
   if (!isReady) {
     return (
@@ -122,7 +153,8 @@ export function AppContent() {
         onOpenAuth={() => setIsAuthModalOpen(true)}
         onOpenNavDrawer={() => setIsNavDrawerOpen(true)}
         isLoggedIn={isAuthenticated}
-        userStreak={14}
+        userStreak={profile?.streakDays ?? 0}
+        unreadNotificationsCount={unreadNotificationsCount}
         userName={user?.name || ''}
         userRole={role || null}
         onLogout={handleLogout}
@@ -139,7 +171,7 @@ export function AppContent() {
           setIsAuthModalOpen(true);
         }}
         isLoggedIn={isAuthenticated}
-        userStreak={14}
+        userStreak={profile?.streakDays ?? 0}
       />
 
       {/* Main Content Router */}
@@ -181,7 +213,11 @@ export function AppContent() {
 
         {/* Route: Hierarchical Chapter Learning Page */}
         {currentPage === 'chapter-learning' && (
-          <ChapterLearningPage onNavigate={handleNavigate} />
+          <ChapterLearningPage
+            onNavigate={handleNavigate}
+            isAuthenticated={isAuthenticated}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
+          />
         )}
 
         {/* Route: All Courses */}
@@ -244,14 +280,21 @@ export function AppContent() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
-        onLoginSuccess={(name, role, accountId) => {
+        onLoginSuccess={(name, loginRole, accountId) => {
           const roleLabel =
-            role === 'admin'
+            loginRole === 'admin'
               ? 'Academic Director'
-              : role === 'teacher'
+              : loginRole === 'teacher'
                 ? 'Mentor / Faculty'
                 : 'Medical Aspirant';
           triggerToast(`Welcome back, ${name}! Logged in as ${roleLabel}. Account: ${accountId}`);
+          // Post-login routing: students with an active enrolled course go to
+          // their Dashboard; students without one (and other roles) go Home.
+          if (loginRole === 'student') {
+            handleNavigate(hasActiveCourse ? 'dashboard' : 'home');
+          } else {
+            handleNavigate('home');
+          }
         }}
       />
 

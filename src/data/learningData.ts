@@ -60,6 +60,7 @@ export const ENROLLED_COURSES_DATA: Record<string, EnrolledCourseData> = {
     totalPdfs: 96,
     completedChaptersCount: 3,
     progressPercentage: 68,
+    negativeMarking: 0,
     segments: [
       {
         id: 'seg-botany',
@@ -93,6 +94,7 @@ export const ENROLLED_COURSES_DATA: Record<string, EnrolledCourseData> = {
     totalPdfs: 96,
     completedChaptersCount: 1,
     progressPercentage: 25,
+    negativeMarking: 0,
     segments: [
       {
         id: 'seg-botany',
@@ -126,6 +128,7 @@ export const ENROLLED_COURSES_DATA: Record<string, EnrolledCourseData> = {
     totalPdfs: 48,
     completedChaptersCount: 2,
     progressPercentage: 54,
+    negativeMarking: 0,
     segments: [
       {
         id: 'seg-zoology',
@@ -152,6 +155,7 @@ export const ENROLLED_COURSES_DATA: Record<string, EnrolledCourseData> = {
     totalPdfs: 96,
     completedChaptersCount: 2,
     progressPercentage: 45,
+    negativeMarking: 0.25,
     segments: [
       {
         id: 'seg-botany',
@@ -185,6 +189,7 @@ export const ENROLLED_COURSES_DATA: Record<string, EnrolledCourseData> = {
     totalPdfs: 96,
     completedChaptersCount: 1,
     progressPercentage: 20,
+    negativeMarking: 0.25,
     segments: [
       {
         id: 'seg-botany',

@@ -159,7 +159,28 @@ export const MyEnrolledCoursesSection: React.FC<MyEnrolledCoursesSectionProps> =
       </div>
 
       {/* 3. Enrolled Courses Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
+      {enrolledCourses.length === 0 ? (
+        <div className="bg-[#111318] border border-dashed border-white/15 rounded-2xl p-8 sm:p-12 text-center space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-[#E50914]/10 text-[#FF3540] flex items-center justify-center mx-auto">
+            <GraduationCap className="w-8 h-8" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base sm:text-lg font-black text-white">No Enrolled Courses Yet</h3>
+            <p className="text-xs text-gray-400 max-w-sm mx-auto leading-relaxed">
+              Enroll in a program to start classes, chapter exams and study materials. Your enrolled
+              courses are linked to your student account only.
+            </p>
+          </div>
+          <button
+            onClick={() => onNavigate('courses')}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#E50914] hover:bg-[#b8060f] text-white text-xs sm:text-sm font-bold rounded-xl shadow-[0_4px_20px_rgba(229,9,20,0.4)] transition-all"
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>Browse All Courses</span>
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
         {enrolledCourses.map((course) => {
           const progress = getCourseProgress(course.courseId);
 
@@ -263,7 +284,8 @@ export const MyEnrolledCoursesSection: React.FC<MyEnrolledCoursesSectionProps> =
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

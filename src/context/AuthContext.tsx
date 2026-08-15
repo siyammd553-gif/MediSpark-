@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { authApi, AuthUser, StudentProfileRecord, RegistrationFields, OtpResponse } from '../utils/authApi';
+import { StudentDashboardData } from '../types';
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -15,6 +16,12 @@ interface AuthContextType {
   logout: () => Promise<void>;
   refreshProfile: () => Promise<StudentProfileRecord | null>;
   updateProfile: (fields: Partial<StudentProfileRecord>) => Promise<StudentProfileRecord>;
+  // The authenticated student's own dashboard record (per-student data separation
+  // keyed by this unique Account ID). Null while still loading or not a student.
+  dashboard: StudentDashboardData | null;
+  refreshDashboard: () => Promise<StudentDashboardData | null>;
+  updateDashboard: (patch: Partial<StudentDashboardData>) => Promise<StudentDashboardData | null>;
+  hasActiveCourse: boolean;
   // All future student features must key their records by this unique Account ID:
   accountId: string | null;
   studentId: string | null;
@@ -26,15 +33,43 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [profile, setProfile] = useState<StudentProfileRecord | null>(null);
+  const [dashboard, setDashboard] = useState<StudentDashboardData | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   const refreshProfile = useCallback(async (): Promise<StudentProfileRecord | null> => {
     try {
       const { profile: serverProfile } = await authApi.getStudentProfile();
       setProfile(serverProfile);
+      // The per-account dashboard data lives on the same server record.
+      setDashboard(serverProfile.dashboard || null);
       return serverProfile;
     } catch (e) {
       console.error('Failed to load student profile', e);
+      return null;
+    }
+  }, []);
+
+  const refreshDashboard = useCallback(async (): Promise<StudentDashboardData | null> => {
+    try {
+      const { profile: serverProfile } = await authApi.getStudentDashboard();
+      setProfile(serverProfile);
+      setDashboard(serverProfile.dashboard || null);
+      return serverProfile.dashboard || null;
+    } catch (e) {
+      console.error('Failed to load student dashboard', e);
+      return null;
+    }
+  }, []);
+
+  const updateDashboard = useCallback(async (patch: Partial<StudentDashboardData>): Promise<StudentDashboardData | null> => {
+    // Optimistic update so the UI responds instantly; the server is authoritative.
+    setDashboard((prev) => (prev ? { ...prev, ...patch } : (patch as StudentDashboardData)));
+    try {
+      const { dashboard: serverDashboard } = await authApi.updateStudentDashboard(patch);
+      setDashboard(serverDashboard);
+      return serverDashboard;
+    } catch (e) {
+      console.error('Failed to sync student dashboard', e);
       return null;
     }
   }, []);
@@ -102,12 +137,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } finally {
       setUser(null);
       setProfile(null);
+      setDashboard(null);
     }
   }, []);
 
   const updateProfile = useCallback(async (fields: Partial<StudentProfileRecord>) => {
     const { profile: updated } = await authApi.updateStudentProfile(fields);
     setProfile(updated);
+    setDashboard(updated.dashboard || null);
     return updated;
   }, []);
 
@@ -125,6 +162,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     logout,
     refreshProfile,
     updateProfile,
+    dashboard,
+    refreshDashboard,
+    updateDashboard,
+    hasActiveCourse: Array.isArray(dashboard?.enrolledCourseIds) && dashboard!.enrolledCourseIds.length > 0,
     accountId: user?.accountId || null,
     studentId: user?.studentId || null,
     role: user?.role || null,
