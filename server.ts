@@ -203,26 +203,31 @@ Guidelines:
   }
 });
 
-// Vite middleware for development or Static files for production
-async function setupApp() {
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`MediSpark Server running on http://0.0.0.0:${PORT}`);
+// Production static/SPA serving (works locally AND inside the Vercel function)
+if (process.env.NODE_ENV === 'production') {
+  const distPath = path.join(process.cwd(), 'dist');
+  app.use(express.static(distPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(distPath, 'index.html'));
   });
 }
 
-setupApp();
+// Vercel serverless entry point: export the Express app (no app.listen on Vercel)
+export default app;
+
+// Local development / standalone production server (skipped on Vercel)
+if (process.env.VERCEL !== '1') {
+  (async () => {
+    if (process.env.NODE_ENV !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    }
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`MediSpark Server running on http://0.0.0.0:${PORT}`);
+    });
+  })();
+}

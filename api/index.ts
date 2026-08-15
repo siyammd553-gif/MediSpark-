@@ -1,0 +1,5 @@
+import app from '../server';
+
+// Vercel serverless function entry: the exported Express app handles
+// all /api/* routes (and serves the built frontend as a fallback).
+export default app;

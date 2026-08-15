@@ -57,7 +57,9 @@ export interface OtpRecord {
   resendCooldownUntil: string;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR =
+  process.env.MEDISPARK_DATA_DIR ||
+  (process.env.VERCEL === '1' ? '/tmp/medispark-data' : path.join(process.cwd(), 'data'));
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
 const SEQUENCES_FILE = path.join(DATA_DIR, 'sequences.json');
