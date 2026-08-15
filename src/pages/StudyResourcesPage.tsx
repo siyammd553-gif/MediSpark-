@@ -1,16 +1,20 @@
 import React, { useState } from 'react';
 import { PageView } from '../types';
 import { RESOURCES_DATA } from '../data/mockData';
-import { Download, FileText, Search, BookOpen, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Download, FileText, Search, BookOpen, Sparkles, CheckCircle2, Lock } from 'lucide-react';
 
 interface StudyResourcesPageProps {
   onNavigate: (page: PageView) => void;
   onDownload: (title: string) => void;
+  isAuthenticated?: boolean;
+  onOpenAuth?: () => void;
 }
 
 export const StudyResourcesPage: React.FC<StudyResourcesPageProps> = ({
   onNavigate,
   onDownload,
+  isAuthenticated,
+  onOpenAuth,
 }) => {
   const [selectedSubject, setSelectedSubject] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -24,6 +28,16 @@ export const StudyResourcesPage: React.FC<StudyResourcesPageProps> = ({
       res.category.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesSubject && matchesSearch;
   });
+
+  // Materials respect the Student Account: guests may browse the vault but
+  // downloads require an authenticated student account.
+  const handleDownload = (title: string) => {
+    if (!isAuthenticated) {
+      onOpenAuth?.();
+      return;
+    }
+    onDownload(title);
+  };
 
   return (
     <div id="study-resources-page" className="min-h-screen bg-[#090909] text-white py-8 sm:py-12">
@@ -104,11 +118,15 @@ export const StudyResourcesPage: React.FC<StudyResourcesPageProps> = ({
               </div>
 
               <button
-                onClick={() => onDownload(res.title)}
+                onClick={() => handleDownload(res.title)}
                 className="w-full py-2.5 px-4 bg-white/5 hover:bg-[#E50914] text-white hover:text-white text-xs font-bold rounded-xl border border-white/10 hover:border-transparent transition-all flex items-center justify-center gap-2"
               >
-                <Download className="w-4 h-4 text-[#FF3540] group-hover:text-white" />
-                <span>Instant PDF Download</span>
+                {isAuthenticated ? (
+                  <Download className="w-4 h-4 text-[#FF3540] group-hover:text-white" />
+                ) : (
+                  <Lock className="w-4 h-4 text-[#FF3540] group-hover:text-white" />
+                )}
+                <span>{isAuthenticated ? 'Instant PDF Download' : 'Log in to Download'}</span>
               </button>
             </div>
           ))}

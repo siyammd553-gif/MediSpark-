@@ -62,10 +62,11 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
   // Category Mode: 1) Class, 2) Exam, 3) Materials, or 4) All Chapters
   const [selectedMode, setSelectedMode] = useState<'classes' | 'exams' | 'materials' | 'all'>('classes');
 
-  // Modals for instant launch from Chapter 1-12 list
-  const [activePlayingClass, setActivePlayingClass] = useState<ChapterClass | null>(null);
-  const [activeExam, setActiveExam] = useState<ChapterExam | null>(null);
-  const [activePdf, setActivePdf] = useState<ChapterPDF | null>(null);
+  // Modals for instant launch from Chapter 1-12 list (carry the full
+  // course/segment/chapter context so access is verified end-to-end)
+  const [activePlayingClass, setActivePlayingClass] = useState<{ cls: ChapterClass; chapter: Chapter; segmentId: string } | null>(null);
+  const [activeExam, setActiveExam] = useState<{ exam: ChapterExam; chapter: Chapter; segmentId: string } | null>(null);
+  const [activePdf, setActivePdf] = useState<{ pdf: ChapterPDF; chapter: Chapter; segmentId: string } | null>(null);
   const [lockedModalInfo, setLockedModalInfo] = useState<string | null>(null);
 
   // Search/Filter within chapters 1-12
@@ -105,6 +106,19 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
     navigateToChapter(course.courseId, currentSegment.id, chapterId);
     setActiveTab(tab);
     onNavigate('chapter-learning');
+  };
+
+  // Guard every instant content launch with the same permission chain:
+  // enrolled course + segment + chapter unlock. A locked chapter can never
+  // open its class/exam/material via any UI path.
+  const guardChapterAccess = (chapterId: string, action: () => void) => {
+    if (!currentSegment) return;
+    const lockCheck = isChapterUnlocked(course.courseId, currentSegment.id, chapterId);
+    if (!lockCheck.unlocked) {
+      setLockedModalInfo(lockCheck.reason || 'This chapter is locked. Complete previous chapters to unlock.');
+      return;
+    }
+    action();
   };
 
   // Access check: this student has not enrolled in the active course.
@@ -593,7 +607,9 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setActivePlayingClass(chapter.classes[0]);
+                              guardChapterAccess(chapter.id, () =>
+                                setActivePlayingClass({ cls: chapter.classes[0], chapter, segmentId: currentSegment.id })
+                              );
                             }}
                             className="flex-1 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
                           >
@@ -617,7 +633,9 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setActiveExam(chapter.exams[0]);
+                              guardChapterAccess(chapter.id, () =>
+                                setActiveExam({ exam: chapter.exams[0], chapter, segmentId: currentSegment.id })
+                              );
                             }}
                             className="flex-1 py-2 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
                           >
@@ -641,7 +659,9 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setActivePdf(chapter.pdfs[0]);
+                              guardChapterAccess(chapter.id, () =>
+                                setActivePdf({ pdf: chapter.pdfs[0], chapter, segmentId: currentSegment.id })
+                              );
                             }}
                             className="flex-1 py-2 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-black rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5"
                           >
@@ -681,7 +701,11 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
       {/* Instant Video Player Modal */}
       {activePlayingClass && (
         <ClassVideoPlayerModal
-          selectedClass={activePlayingClass}
+          chapterClass={activePlayingClass.cls}
+          chapterTitle={activePlayingClass.chapter.title}
+          courseId={course.courseId}
+          segmentId={activePlayingClass.segmentId}
+          chapterId={activePlayingClass.chapter.id}
           onClose={() => setActivePlayingClass(null)}
         />
       )}
@@ -689,7 +713,11 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
       {/* Instant Exam Simulator Modal */}
       {activeExam && (
         <ChapterExamSimulatorModal
-          exam={activeExam}
+          exam={activeExam.exam}
+          chapterTitle={activeExam.chapter.title}
+          courseId={course.courseId}
+          chapterId={activeExam.chapter.id}
+          negativeMarking={course.negativeMarking ?? 0}
           onClose={() => setActiveExam(null)}
         />
       )}
@@ -697,7 +725,8 @@ export const CourseOverviewView: React.FC<CourseOverviewViewProps> = ({ onNaviga
       {/* Instant PDF Reader Modal */}
       {activePdf && (
         <ChapterPdfReaderModal
-          pdf={activePdf}
+          pdf={activePdf.pdf}
+          chapterTitle={activePdf.chapter.title}
           onClose={() => setActivePdf(null)}
         />
       )}

@@ -27,8 +27,21 @@ export interface SessionRecord {
   expiresAt: string;
 }
 
+// A student's access grant to one course. The server is the ONLY
+// writer of these records: students can enroll in free courses and
+// (via simulated checkout) purchase paid ones; admins/teachers can
+// assign courses. The dashboard PATCH endpoint can never create one.
+export interface EnrollmentRecord {
+  courseId: string;
+  source: 'enrolled' | 'purchased' | 'assigned';
+  enrolledAt: string;
+  paymentMethod?: string;
+  amountPaid?: number;
+}
+
 export interface StudentDashboardData {
   enrolledCourseIds: string[];
+  enrollments: EnrollmentRecord[];
   completedClassIds: string[];
   completedExamIds: Record<string, { bestScore: number; lastScore: number; attempts: number; timestamp: string }>;
   viewedPdfIds: string[];
@@ -61,6 +74,7 @@ export interface StudentDashboardData {
 export function emptyStudentDashboard(): StudentDashboardData {
   return {
     enrolledCourseIds: [],
+    enrollments: [],
     completedClassIds: [],
     completedExamIds: {},
     viewedPdfIds: [],
@@ -617,22 +631,136 @@ export function createStudentRecord(user: AuthUser): StudentRecord {
   return record;
 }
 
+// ---------------------------------------------------------------
+// ENROLLMENTS (server-authoritative access grants)
+// ---------------------------------------------------------------
+// Enrollment records are the single source of truth for course
+// access. Legacy student records that only have enrolledCourseIds
+// are reconciled into enrollment records on first read/write so
+// existing accounts keep working.
+
+function toEnrollmentRecords(ids: string[]): EnrollmentRecord[] {
+  return (ids || [])
+    .filter((id) => typeof id === 'string' && id.length > 0)
+    .map((courseId) => ({ courseId, source: 'enrolled' as const, enrolledAt: new Date().toISOString() }));
+}
+
+// Bring a student record's enrollment state in sync (legacy
+// enrolledCourseIds -> enrollments records, mirror back the ids).
+export function reconcileEnrollments(record: StudentRecord): StudentRecord {
+  const dashboard = record.dashboard || emptyStudentDashboard();
+  let enrollments: EnrollmentRecord[] = Array.isArray(dashboard.enrollments)
+    ? dashboard.enrollments.filter((e) => e && typeof e.courseId === 'string')
+    : [];
+  const legacyIds: string[] = Array.isArray(dashboard.enrolledCourseIds) ? dashboard.enrolledCourseIds : [];
+  if (enrollments.length === 0 && legacyIds.length > 0) {
+    enrollments = toEnrollmentRecords(legacyIds);
+    dashboard.enrollments = enrollments;
+  }
+  dashboard.enrolledCourseIds = enrollments.map((e) => e.courseId);
+  record.dashboard = dashboard;
+  record.enrolledCourseIds = dashboard.enrolledCourseIds;
+  record.enrolledCoursesCount = dashboard.enrolledCourseIds.length;
+  return record;
+}
+
+export function getEnrollments(accountId: string): EnrollmentRecord[] {
+  const record = getStudentRecord(accountId);
+  if (!record) return [];
+  const reconciled = reconcileEnrollments(record);
+  if (reconciled !== record) saveStudentRecord(accountId, record);
+  return Array.isArray(reconciled.dashboard?.enrollments) ? reconciled.dashboard.enrollments : [];
+}
+
+export function getEnrollment(accountId: string, courseId: string): EnrollmentRecord | undefined {
+  return getEnrollments(accountId).find((e) => e.courseId === courseId);
+}
+
+export function isEnrolled(accountId: string, courseId: string): boolean {
+  return getEnrollments(accountId).some((e) => e.courseId === courseId);
+}
+
+// Server-only writer: creates an enrollment record (validated by the
+// caller against the course catalog). Returns null for unknown student.
+export function addEnrollment(
+  accountId: string,
+  courseId: string,
+  source: 'enrolled' | 'purchased' | 'assigned',
+  meta?: { paymentMethod?: string; amountPaid?: number }
+): StudentRecord | null {
+  const record = getStudentRecord(accountId);
+  if (!record) return null;
+  const reconciled = reconcileEnrollments(record);
+  const enrollments = (reconciled.dashboard?.enrollments || []).filter((e) => e.courseId !== courseId);
+  enrollments.push({
+    courseId,
+    source,
+    enrolledAt: new Date().toISOString(),
+    paymentMethod: meta?.paymentMethod || undefined,
+    amountPaid: meta?.amountPaid !== undefined ? meta.amountPaid : undefined,
+  });
+  reconciled.dashboard.enrollments = enrollments;
+  reconciled.dashboard.enrolledCourseIds = enrollments.map((e) => e.courseId);
+  reconciled.enrolledCourseIds = reconciled.dashboard.enrolledCourseIds;
+  reconciled.enrolledCoursesCount = reconciled.enrolledCourseIds.length;
+  reconciled.updatedAt = new Date().toISOString();
+  saveStudentRecord(accountId, reconciled);
+  return reconciled;
+}
+
+export function removeEnrollment(accountId: string, courseId: string): StudentRecord | null {
+  const record = getStudentRecord(accountId);
+  if (!record) return null;
+  const reconciled = reconcileEnrollments(record);
+  const enrollments = (reconciled.dashboard?.enrollments || []).filter((e) => e.courseId !== courseId);
+  reconciled.dashboard.enrollments = enrollments;
+  reconciled.dashboard.enrolledCourseIds = enrollments.map((e) => e.courseId);
+  reconciled.enrolledCourseIds = reconciled.dashboard.enrolledCourseIds;
+  reconciled.enrolledCoursesCount = reconciled.enrolledCourseIds.length;
+  reconciled.updatedAt = new Date().toISOString();
+  saveStudentRecord(accountId, reconciled);
+  return reconciled;
+}
+
 // Merge a partial dashboard update into a student's per-account record.
 // Returns the updated record, or null if the student record does not exist.
+//
+// SECURITY: enrollment fields in a client patch are never accepted as-is.
+// A student cannot grant themselves access to a course by crafting a
+// request; enrollments can only be created via the dedicated server
+// endpoints (free enroll / simulated purchase / admin-teacher assign).
+export const DASHBOARD_PATCHABLE_KEYS = [
+  'completedClassIds',
+  'completedExamIds',
+  'viewedPdfIds',
+  'lastActivePosition',
+  'recentlyViewed',
+  'favorites',
+  'examResults',
+  'notifications',
+] as const;
+
 export function mergeStudentDashboard(
   accountId: string,
   patch: Partial<StudentDashboardData> | null
 ): StudentRecord | null {
   const record = getStudentRecord(accountId);
   if (!record) return null;
-  const existing = record.dashboard || emptyStudentDashboard();
-  const dashboard: StudentDashboardData = { ...existing, ...(patch || {}) };
-  record.dashboard = dashboard;
-  record.enrolledCourseIds = Array.isArray(dashboard.enrolledCourseIds) ? dashboard.enrolledCourseIds : [];
-  record.enrolledCoursesCount = record.enrolledCourseIds.length;
-  record.updatedAt = new Date().toISOString();
-  saveStudentRecord(accountId, record);
-  return record;
+  const reconciled = reconcileEnrollments(record);
+  const existing = reconciled.dashboard || emptyStudentDashboard();
+  const safePatch: Partial<StudentDashboardData> = {};
+  for (const key of DASHBOARD_PATCHABLE_KEYS) {
+    if (patch && (patch as Record<string, unknown>)[key] !== undefined) {
+      (safePatch as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key];
+    }
+  }
+  const dashboard: StudentDashboardData = { ...existing, ...safePatch };
+  reconciled.dashboard = dashboard;
+  reconciled.enrolledCourseIds = Array.isArray(dashboard.enrolledCourseIds) ? dashboard.enrolledCourseIds : [];
+  reconciled.enrolledCoursesCount = reconciled.enrolledCourseIds.length;
+  reconciled.updatedAt = new Date().toISOString();
+  saveStudentRecord(accountId, reconciled);
+  return reconciled;
 }
 
 // ---------------------------------------------------------------
@@ -648,15 +776,28 @@ export const DEMO_ENROLLED_COURSES = [
 
 // Backfills the seeded demo Student Account with its own enrollment list so
 // the demo stays populated. Never applied to any other student account.
+// Sources follow the course catalog: free courses are 'enrolled', paid
+// courses are demo 'purchased' grants.
 export function backfillDemoStudentEnrollments() {
   const demo = getUsers().find((u) => u.email === DEMO_STUDENT_EMAIL);
   if (!demo) return;
   const record = getStudentRecord(demo.accountId);
   if (!record) return;
-  const existing = record.dashboard?.enrolledCourseIds ?? [];
+  const existing = record.dashboard?.enrollments ?? record.dashboard?.enrolledCourseIds ?? [];
   if (existing.length > 0) return;
-  record.dashboard = { ...emptyStudentDashboard(), enrolledCourseIds: [...DEMO_ENROLLED_COURSES] };
-  record.enrolledCourseIds = [...DEMO_ENROLLED_COURSES];
+  const enrollments: EnrollmentRecord[] = DEMO_ENROLLED_COURSES.map((courseId) => ({
+    courseId,
+    source: courseId === 'medical-admission-hsc-28' ? ('purchased' as const) : ('enrolled' as const),
+    enrolledAt: new Date().toISOString(),
+    paymentMethod: courseId === 'medical-admission-hsc-28' ? 'bKash' : undefined,
+    amountPaid: courseId === 'medical-admission-hsc-28' ? 6500 : undefined,
+  }));
+  record.dashboard = {
+    ...emptyStudentDashboard(),
+    enrolledCourseIds: enrollments.map((e) => e.courseId),
+    enrollments,
+  };
+  record.enrolledCourseIds = enrollments.map((e) => e.courseId);
   record.enrolledCoursesCount = record.enrolledCourseIds.length;
   record.updatedAt = new Date().toISOString();
   saveStudentRecord(demo.accountId, record);

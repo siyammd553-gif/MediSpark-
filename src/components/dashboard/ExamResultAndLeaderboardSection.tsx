@@ -6,16 +6,9 @@ import { useExamAttempts, useLeaderboard } from '../../utils/examApi';
 import { 
   Trophy, 
   BarChart2, 
-  Award, 
   Play, 
-  CheckCircle2, 
   TrendingUp, 
-  ArrowRight, 
   Bookmark, 
-  Check, 
-  Calendar,
-  AlertCircle,
-  Users,
   FileQuestion
 } from 'lucide-react';
 import confetti from 'canvas-confetti';

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Course } from '../types';
 import { useCourseImage } from '../utils/courseStorage';
+import { useLearning } from '../context/LearningContext';
 import { CoursePictureModal } from './CoursePictureModal';
 import {
   Camera,
@@ -31,6 +32,8 @@ export const CourseCard: React.FC<CourseCardProps> = ({
   onPreviewLesson,
 }) => {
   const { currentImage, isCustom } = useCourseImage(course);
+  const { isCourseEnrolled } = useLearning();
+  const isEnrolled = isCourseEnrolled(course.id);
   const [isPictureModalOpen, setIsPictureModalOpen] = useState<boolean>(false);
 
   // Format fee display
@@ -191,15 +194,23 @@ export const CourseCard: React.FC<CourseCardProps> = ({
               <button
                 id={`enroll-btn-${course.id}`}
                 type="button"
-                onClick={() => onEnroll(course)}
-                className={`w-full inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all shadow-[0_4px_16px_rgba(229,9,20,0.35)] hover:shadow-[0_6px_20px_rgba(229,9,20,0.5)] active:scale-[0.98] ${
-                  isFreeCourse
+                onClick={() => {
+                  if (isEnrolled) {
+                    onOpenDetails(course);
+                    return;
+                  }
+                  onEnroll(course);
+                }}
+                className={`w-full inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-black transition-all active:scale-[0.98] ${
+                  isEnrolled
                     ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_4px_16px_rgba(16,185,129,0.35)]'
-                    : 'bg-[#E50914] hover:bg-[#b8060f] text-white'
+                    : isFreeCourse
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_4px_16px_rgba(16,185,129,0.35)]'
+                      : 'bg-[#E50914] hover:bg-[#b8060f] text-white shadow-[0_4px_16px_rgba(229,9,20,0.35)] hover:shadow-[0_6px_20px_rgba(229,9,20,0.5)]'
                 }`}
               >
                 <Check className="w-4 h-4 stroke-[3]" />
-                <span>{isFreeCourse ? '✓ Enroll Free' : '✓ Enroll'}</span>
+                <span>{isEnrolled ? '✓ Enrolled' : isFreeCourse ? '✓ Enroll Free' : '✓ Enroll'}</span>
               </button>
             </div>
           </div>

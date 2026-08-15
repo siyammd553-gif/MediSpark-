@@ -80,15 +80,20 @@ export function AppContent() {
     triggerToast(`📥 Downloading "${title}" (High-Yield PDF)...`);
   };
 
-  const handleEnrollCourse = (course: Course) => {
-    // Enrollment is tied to the authenticated student's account.
+  const handleEnrollCourse = async (course: Course) => {
+    // Enrollment is tied to the authenticated student's account and is
+    // recorded server-side against the course catalog.
     if (!isAuthenticated || role !== 'student') {
       triggerToast('🔒 Please log in to enroll in a course.');
       setIsAuthModalOpen(true);
       return;
     }
     if (course.isFree || course.price === 0) {
-      enrollInCourse(course.id);
+      const ok = await enrollInCourse(course.id);
+      if (!ok) {
+        triggerToast('⚠️ Enrollment failed. Please try again.');
+        return;
+      }
       navigateToCourse(course.id);
       triggerToast(`🎉 Enrolled in ${course.title}! Loading Course Overview...`);
       setTimeout(() => {
@@ -100,12 +105,16 @@ export function AppContent() {
     setIsPaymentModalOpen(true);
   };
 
-  const handlePaymentSuccess = (course: Course) => {
+  const handlePaymentSuccess = async (course: Course, paymentMethod?: string) => {
     if (!isAuthenticated || role !== 'student') {
       setIsAuthModalOpen(true);
       return;
     }
-    enrollInCourse(course.id);
+    const ok = await enrollInCourse(course.id, paymentMethod);
+    if (!ok) {
+      triggerToast('⚠️ Purchase confirmation failed. Please try again.');
+      return;
+    }
     navigateToCourse(course.id);
     triggerToast(`🎉 Successfully enrolled in ${course.title}!`);
     setTimeout(() => {
@@ -253,6 +262,8 @@ export function AppContent() {
           <StudyResourcesPage
             onNavigate={handleNavigate}
             onDownload={handleDownloadResource}
+            isAuthenticated={isAuthenticated}
+            onOpenAuth={() => setIsAuthModalOpen(true)}
           />
         )}
 

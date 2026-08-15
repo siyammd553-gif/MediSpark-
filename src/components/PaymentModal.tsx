@@ -7,7 +7,7 @@ interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   course: Course | null;
-  onSuccess: (course: Course) => void;
+  onSuccess: (course: Course, paymentMethod?: string) => void;
 }
 
 export const PaymentModal: React.FC<PaymentModalProps> = ({
@@ -47,7 +47,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       setIsProcessing(false);
       setIsCompleted(true);
       confetti({ particleCount: 100, spread: 80, origin: { y: 0.5 } });
-      onSuccess(course);
+      onSuccess(course, method);
     }, 1200);
   };
 

@@ -513,6 +513,9 @@ export const ChapterLearningPage: React.FC<ChapterLearningPageProps> = ({ onNavi
         <ClassVideoPlayerModal
           chapterClass={selectedPlayingClass}
           chapterTitle={chapter.title}
+          courseId={course.courseId}
+          segmentId={segment.id}
+          chapterId={chapter.id}
           onClose={() => setSelectedPlayingClass(null)}
         />
       )}

@@ -13,6 +13,15 @@ import {
   seedAccounts,
 } from './auth';
 import { createStudentRecord, listStudentRecords, getUsers, mergeStudentDashboard } from './store';
+import { getEnrollment, isEnrolled, addEnrollment, removeEnrollment } from './store';
+import {
+  getCourseMeta,
+  getCourseFee,
+  isValidExamForCourse,
+  isExamForChapter,
+  isValidChapterForCourse,
+  isValidSegmentForCourse,
+} from './catalog';
 import {
   getExamAttempts,
   getActiveExam,
@@ -156,6 +165,90 @@ app.get('/api/teacher/students', requireAuth, requireRole('teacher', 'admin'), (
 });
 
 // =============================================================
+// ENROLLMENT & COURSE ACCESS SYSTEM
+// -------------------------------------------------------------
+// Enrollment records are created ONLY here, server-side, keyed by
+// the authenticated Student Account. Students can enroll in free
+// courses, "purchase" paid courses (simulated checkout), and
+// admins/teachers can assign courses. The dashboard PATCH endpoint
+// can never self-grant access.
+// =============================================================
+
+// Enroll the authenticated student in a course. Free courses grant
+// immediate access ('enrolled'); paid courses record a simulated
+// purchase ('purchased') with the selected payment method.
+app.post('/api/student/enrollments', requireAuth, requireRole('student'), (req, res) => {
+  const accountId = activeStudentAccount(req);
+  const body = req.body || {};
+  const courseId = String(body.courseId || '').trim();
+  const paymentMethod = String(body.paymentMethod || '').trim();
+
+  const meta = getCourseMeta(courseId);
+  if (!meta) {
+    return res.status(404).json({ error: 'Course not found in the MediSpark catalog.' });
+  }
+  if (getEnrollment(accountId, courseId)) {
+    return res.status(409).json({ error: 'You are already enrolled in this course.' });
+  }
+
+  const fee = getCourseFee(courseId);
+  if (!fee.isFree) {
+    if (!paymentMethod) {
+      return res.status(400).json({ error: 'A payment method is required to purchase this course.' });
+    }
+    const record = addEnrollment(accountId, courseId, 'purchased', {
+      paymentMethod,
+      amountPaid: fee.amount,
+    });
+    if (!record) return res.status(404).json({ error: 'Student record not found.' });
+    return res.json({
+      enrollment: getEnrollment(accountId, courseId),
+      dashboard: record.dashboard,
+      message: `Course purchased successfully (${paymentMethod}).`,
+    });
+  }
+
+  const record = addEnrollment(accountId, courseId, 'enrolled');
+  if (!record) return res.status(404).json({ error: 'Student record not found.' });
+  res.json({ enrollment: getEnrollment(accountId, courseId), dashboard: record.dashboard, message: 'Enrolled successfully.' });
+});
+
+// Remove the authenticated student's own enrollment (access revoked).
+app.delete('/api/student/enrollments/:courseId', requireAuth, requireRole('student'), (req, res) => {
+  const accountId = activeStudentAccount(req);
+  const courseId = String(req.params.courseId || '');
+  const record = removeEnrollment(accountId, courseId);
+  if (!record) return res.status(404).json({ error: 'Student record not found.' });
+  res.json({ ok: true, dashboard: record.dashboard });
+});
+
+// Admin assigns a course to any student account ('assigned' source).
+app.post('/api/admin/enrollments', requireAuth, requireRole('admin'), (req, res) => {
+  const body = req.body || {};
+  const accountId = String(body.accountId || '').trim();
+  const courseId = String(body.courseId || '').trim();
+  if (!getCourseMeta(courseId)) {
+    return res.status(404).json({ error: 'Course not found in the MediSpark catalog.' });
+  }
+  const record = addEnrollment(accountId, courseId, 'assigned');
+  if (!record) return res.status(404).json({ error: 'Student record not found.' });
+  res.json({ enrollment: getEnrollment(accountId, courseId), student: { accountId: record.accountId, name: record.name } });
+});
+
+// Teacher assigns a course to a student account ('assigned' source).
+app.post('/api/teacher/enrollments', requireAuth, requireRole('teacher', 'admin'), (req, res) => {
+  const body = req.body || {};
+  const accountId = String(body.accountId || '').trim();
+  const courseId = String(body.courseId || '').trim();
+  if (!getCourseMeta(courseId)) {
+    return res.status(404).json({ error: 'Course not found in the MediSpark catalog.' });
+  }
+  const record = addEnrollment(accountId, courseId, 'assigned');
+  if (!record) return res.status(404).json({ error: 'Student record not found.' });
+  res.json({ enrollment: getEnrollment(accountId, courseId), student: { accountId: record.accountId, name: record.name } });
+});
+
+// =============================================================
 // ENROLLED COURSE EXAM SYSTEM (keyed by authenticated Student Account)
 // - Active exam tracked server-side with a question snapshot
 // - Every attempt is scored server-side and belongs to the student
@@ -178,6 +271,10 @@ function sanitizeQuestion(q: any) {
 
 // Start an exam: finalize any in-progress exam for this student first, then
 // create a fresh server-side active session with the question snapshot.
+// ACCESS CONTROL: the student must be enrolled in the course, and the exam
+// (plus any segment/chapter) must belong to that course in the catalog.
+// Changing request parameters can never start an exam the student is not
+// authorized to take.
 app.post('/api/student/exams/start', requireAuth, requireRole('student'), (req, res) => {
   const accountId = activeStudentAccount(req);
   const body = req.body || {};
@@ -186,6 +283,27 @@ app.post('/api/student/exams/start', requireAuth, requireRole('student'), (req, 
   const courseId = String(body.courseId || '');
   if (!examId || !courseId) {
     return res.status(400).json({ error: 'examId and courseId are required.' });
+  }
+
+  if (!isEnrolled(accountId, courseId)) {
+    return res.status(403).json({ error: 'You are not enrolled in this course. Enroll first to access its exams.' });
+  }
+  if (!getCourseMeta(courseId)) {
+    return res.status(404).json({ error: 'Course not found in the MediSpark catalog.' });
+  }
+  if (!isValidExamForCourse(examId, courseId)) {
+    return res.status(403).json({ error: 'This exam does not belong to your enrolled course.' });
+  }
+  const chapterId = String(body.chapterId || '');
+  const segmentId = String(body.segmentId || '');
+  if (chapterId && !isValidChapterForCourse(chapterId, courseId)) {
+    return res.status(403).json({ error: 'This chapter does not belong to your enrolled course.' });
+  }
+  if (chapterId && !isExamForChapter(examId, chapterId)) {
+    return res.status(403).json({ error: 'This exam does not belong to the requested chapter.' });
+  }
+  if (segmentId && !isValidSegmentForCourse(segmentId, courseId)) {
+    return res.status(403).json({ error: 'This subject/segment does not belong to your enrolled course.' });
   }
 
   const previousFinalized = finalizeActiveExam(accountId, 0, 'autosubmitted');

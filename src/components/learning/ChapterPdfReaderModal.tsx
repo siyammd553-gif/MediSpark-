@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChapterPDF } from '../../types';
 import { useLearning } from '../../context/LearningContext';
+import { useFavorites } from '../../utils/favoriteStorage';
 import { 
   X, 
   Download, 
@@ -12,7 +13,8 @@ import {
   CheckCircle2, 
   BookOpen, 
   Maximize2,
-  Share2
+  Share2,
+  Bookmark
 } from 'lucide-react';
 
 interface ChapterPdfReaderModalProps {
@@ -27,7 +29,9 @@ export const ChapterPdfReaderModal: React.FC<ChapterPdfReaderModalProps> = ({
   onClose
 }) => {
   const { markPdfViewed, userState } = useLearning();
+  const { favorites, addFavoriteDocument, removeFavoriteDocument } = useFavorites();
   const isViewed = userState.viewedPdfIds.includes(pdf.id);
+  const isFavorited = favorites.documents.some((d) => d.id === pdf.id);
 
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [zoomLevel, setZoomLevel] = useState<number>(100);
@@ -46,6 +50,25 @@ export const ChapterPdfReaderModal: React.FC<ChapterPdfReaderModalProps> = ({
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
+  };
+
+  // Favourite (Save) — persisted under this Student Account so the material
+  // appears in the student's Favourites vault.
+  const handleToggleFavorite = () => {
+    if (isFavorited) {
+      removeFavoriteDocument(pdf.id);
+      return;
+    }
+    addFavoriteDocument({
+      id: pdf.id,
+      title: pdf.title,
+      subject: 'Biology',
+      category: pdf.type === 'lecture-sheet' ? 'Lecture Sheet' : pdf.type === 'mcq-bank' ? 'Question Bank' : 'Lecture Sheet',
+      pages: pdf.pages || pdf.pagesCount || 16,
+      fileSize: pdf.fileSize,
+      fileType: 'PDF',
+      downloadCount: 0,
+    });
   };
 
   return (
@@ -72,6 +95,19 @@ export const ChapterPdfReaderModal: React.FC<ChapterPdfReaderModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <button
+              onClick={handleToggleFavorite}
+              title={isFavorited ? 'Remove from Favourites' : 'Save to Favourites'}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                isFavorited
+                  ? 'bg-amber-400/15 text-amber-300 border-amber-400/40'
+                  : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
+              }`}
+            >
+              <Bookmark className={`w-3.5 h-3.5 ${isFavorited ? 'fill-amber-300' : ''}`} />
+              <span className="hidden sm:inline">{isFavorited ? 'Saved' : 'Save'}</span>
+            </button>
+
             <button
               onClick={handleDownload}
               className="px-3.5 py-1.5 bg-[#E50914] hover:bg-[#b8060f] text-white text-xs font-bold rounded-xl shadow transition-all flex items-center gap-1.5"

@@ -12,6 +12,7 @@ import {
 } from '../types';
 import { ENROLLED_COURSES_DATA } from '../data/learningData';
 import { useAuth } from './AuthContext';
+import { authApi } from '../utils/authApi';
 
 interface LearningContextType {
   userState: UserLearningState;
@@ -42,8 +43,11 @@ interface LearningContextType {
   markClassCompleted: (classId: string) => void;
   recordExamSubmission: (examId: string, score: number, totalMarks: number) => void;
   markPdfViewed: (pdfId: string) => void;
-  enrollInCourse: (courseId: string) => void;
+  enrollInCourse: (courseId: string, paymentMethod?: string) => Promise<boolean>;
   isCourseEnrolled: (courseId: string) => boolean;
+
+  // Access Control Helpers
+  canAccessChapter: (courseId: string, segmentId: string, chapterId: string) => boolean;
 
   // Computed Progress Helpers
   getCourseProgress: (courseId: string) => { percentage: number; completedChapters: number; totalChapters: number; completedClasses: number; totalClasses: number };
@@ -59,7 +63,7 @@ const EMPTY_POSITION: ActiveLearningPosition = { courseId: '', segmentId: '', ch
 const RECENTLY_VIEWED_MAX = 20;
 
 export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { accountId, dashboard, updateDashboard } = useAuth();
+  const { accountId, dashboard, updateDashboard, refreshDashboard } = useAuth();
 
   const [activeCourseId, setActiveCourseId] = useState<string>('hsc-28-complete-biology');
   const [activeSegmentId, setActiveSegmentId] = useState<string>('seg-hsc28-01');
@@ -71,7 +75,10 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [activePdf, setActivePdf] = useState<ChapterPDF | null>(null);
 
   // The authenticated student's learning state is derived from their own
-  // server-backed dashboard record (keyed by Account ID). No hardcoded seeding.
+  // server-backed dashboard record (keyed by Account ID). Enrollment comes
+  // from the server's enrollment records ('enrolled' | 'purchased' |
+  // 'assigned'); legacy records without enrollments fall back to the
+  // enrolledCourseIds mirror. No hardcoded seeding.
   const userState: UserLearningState = {
     enrolledCourseIds: dashboard?.enrolledCourseIds ?? [],
     completedClassIds: dashboard?.completedClassIds ?? [],
@@ -79,6 +86,15 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     viewedPdfIds: dashboard?.viewedPdfIds ?? [],
     lastActivePosition: dashboard?.lastActivePosition ?? EMPTY_POSITION,
   };
+
+  // Server-authoritative enrollment records (fall back to the mirror list).
+  const enrollmentSource = useMemo(() => {
+    const records = dashboard?.enrollments;
+    if (records && records.length > 0) {
+      return new Map(records.map((e) => [e.courseId, e.source]));
+    }
+    return new Map((dashboard?.enrolledCourseIds ?? []).map((id) => [id, 'enrolled' as const]));
+  }, [dashboard?.enrollments, dashboard?.enrolledCourseIds]);
 
   // Only the courses this authenticated student has actually enrolled in are
   // exposed. This keeps every student's course/class/material content isolated
@@ -93,8 +109,8 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [userState.enrolledCourseIds]);
 
   const isCourseEnrolled = useCallback(
-    (courseId: string) => userState.enrolledCourseIds.includes(courseId),
-    [userState.enrolledCourseIds]
+    (courseId: string) => enrollmentSource.has(courseId),
+    [enrollmentSource]
   );
 
   const trackRecentlyViewed = useCallback(
@@ -110,7 +126,8 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [accountId, dashboard?.recentlyViewed, updateDashboard]
   );
 
-  // Navigate directly to a chapter
+  // Navigate directly to a chapter (enrollment-gated: no navigation can
+  // reach a chapter of a course this student is not enrolled in).
   const navigateToChapter = useCallback(
     (
       courseId: string,
@@ -118,6 +135,11 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       chapterId: string,
       tab: 'classes' | 'exams' | 'pdfs' | 'more' = 'classes'
     ) => {
+      if (!coursesData[courseId]) return;
+      const course = coursesData[courseId];
+      const segment = course.segments.find((s) => s.id === segmentId);
+      const chapter = segment?.chapters.find((c) => c.id === chapterId);
+      if (!segment || !chapter) return;
       setActiveCourseId(courseId);
       setActiveSegmentId(segmentId);
       setActiveChapterId(chapterId);
@@ -135,7 +157,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         trackRecentlyViewed({ id: chapterId, type: 'chapter', courseId, chapterId, title: chapterId });
       }
     },
-    [accountId, updateDashboard, trackRecentlyViewed]
+    [accountId, updateDashboard, trackRecentlyViewed, coursesData]
   );
 
   const navigateToCourse = useCallback(
@@ -261,13 +283,28 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 
   const enrollInCourse = useCallback(
-    (courseId: string) => {
-      if (!accountId) return;
-      const current = dashboard?.enrolledCourseIds ?? [];
-      if (current.includes(courseId)) return;
-      updateDashboard({ enrolledCourseIds: [...current, courseId] });
+    async (courseId: string, paymentMethod?: string): Promise<boolean> => {
+      if (!accountId) return false;
+      if (enrollmentSource.has(courseId)) return true;
+      try {
+        // Server-authoritative enrollment (validates the catalog, records a
+        // simulated purchase for paid courses). Access cannot be self-granted.
+        const { dashboard: updated } = await authApi.enrollInCourse({
+          courseId,
+          paymentMethod: paymentMethod || undefined,
+        });
+        if (updated?.enrollments) {
+          updateDashboard({ enrollments: updated.enrollments, enrolledCourseIds: updated.enrolledCourseIds });
+        } else {
+          await refreshDashboard();
+        }
+        return true;
+      } catch (e) {
+        console.error('Failed to enroll in course', e);
+        return false;
+      }
     },
-    [accountId, dashboard?.enrolledCourseIds, updateDashboard]
+    [accountId, enrollmentSource, updateDashboard, refreshDashboard]
   );
 
   // Check if chapter is completed
@@ -396,6 +433,25 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return { unlocked: true };
   };
 
+  // Full access-control chain for protected content:
+  // Student Account (accountId) + Enrollment (course) + Segment/Subject +
+  // Chapter + unlock permission. Returns false when any link is missing so
+  // no UI path or crafted navigation can reach protected content.
+  const canAccessChapter = useCallback(
+    (courseId: string, segmentId: string, chapterId: string): boolean => {
+      if (!accountId) return false;
+      if (!enrollmentSource.has(courseId)) return false;
+      const course = coursesData[courseId];
+      if (!course) return false;
+      const segment = course.segments.find((s) => s.id === segmentId);
+      if (!segment) return false;
+      const chapter = segment.chapters.find((c) => c.id === chapterId);
+      if (!chapter) return false;
+      return isChapterUnlocked(courseId, segmentId, chapterId).unlocked;
+    },
+    [accountId, enrollmentSource, coursesData, isChapterUnlocked]
+  );
+
   const handleSetActivePlayingClass = useCallback(
     (c: ChapterClass | null) => {
       setActivePlayingClass(c);
@@ -435,6 +491,7 @@ export const LearningProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         markPdfViewed,
         enrollInCourse,
         isCourseEnrolled,
+        canAccessChapter,
         getCourseProgress,
         getSegmentProgress,
         getChapterProgress,

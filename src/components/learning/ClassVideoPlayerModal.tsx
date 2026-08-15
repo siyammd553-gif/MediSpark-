@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChapterClass } from '../../types';
 import { useLearning } from '../../context/LearningContext';
+import { useFavorites } from '../../utils/favoriteStorage';
 import { 
   X, 
   Play, 
@@ -21,16 +22,24 @@ import {
 interface ClassVideoPlayerModalProps {
   chapterClass: ChapterClass;
   chapterTitle: string;
+  courseId?: string;
+  segmentId?: string;
+  chapterId?: string;
   onClose: () => void;
 }
 
 export const ClassVideoPlayerModal: React.FC<ClassVideoPlayerModalProps> = ({
   chapterClass,
   chapterTitle,
+  courseId,
+  segmentId,
+  chapterId,
   onClose
 }) => {
   const { markClassCompleted, userState } = useLearning();
+  const { favorites, addFavoriteClass, removeFavoriteClass } = useFavorites();
   const isAlreadyCompleted = userState.completedClassIds.includes(chapterClass.id);
+  const isFavorited = favorites.classes.some((c) => c.id === chapterClass.id);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [currentSpeed, setCurrentSpeed] = useState<number>(1);
@@ -50,6 +59,29 @@ export const ClassVideoPlayerModal: React.FC<ClassVideoPlayerModalProps> = ({
     setTimeout(() => {
       setShowCelebration(false);
     }, 2500);
+  };
+
+  // Favourite (Bookmark) — saved under this Student Account via the server
+  // dashboard record, so the class appears in the student's Favourites.
+  const handleToggleFavorite = () => {
+    if (isFavorited) {
+      removeFavoriteClass(chapterClass.id);
+      return;
+    }
+    addFavoriteClass({
+      id: chapterClass.id,
+      title: chapterClass.title,
+      courseTitle: chapterTitle,
+      subject: 'Biology',
+      chapter: chapterTitle,
+      mentorName: chapterClass.teacherName,
+      duration: chapterClass.duration,
+      thumbnail: chapterClass.videoThumbnail,
+      videoUrl: chapterClass.videoUrl,
+      courseId,
+      segmentId,
+      chapterId,
+    });
   };
 
   return (
@@ -76,6 +108,19 @@ export const ClassVideoPlayerModal: React.FC<ClassVideoPlayerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={handleToggleFavorite}
+              title={isFavorited ? 'Remove from Favourites' : 'Save to Favourites'}
+              className={`hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                isFavorited
+                  ? 'bg-amber-400/15 text-amber-300 border-amber-400/40'
+                  : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
+              }`}
+            >
+              <Bookmark className={`w-4 h-4 ${isFavorited ? 'fill-amber-300' : ''}`} />
+              <span>{isFavorited ? 'Saved' : 'Save'}</span>
+            </button>
+
             {isAlreadyCompleted ? (
               <span className="hidden sm:inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-400/10 px-3 py-1.5 rounded-xl border border-emerald-400/30">
                 <CheckCircle2 className="w-4 h-4" />
@@ -199,15 +244,30 @@ export const ClassVideoPlayerModal: React.FC<ClassVideoPlayerModalProps> = ({
                 </div>
               </div>
 
-              {!isAlreadyCompleted && (
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={handleMarkComplete}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold rounded-xl shadow transition-all flex items-center justify-center gap-1.5 shrink-0"
+                  onClick={handleToggleFavorite}
+                  title={isFavorited ? 'Remove from Favourites' : 'Save to Favourites'}
+                  className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all ${
+                    isFavorited
+                      ? 'bg-amber-400/15 text-amber-300 border-amber-400/40'
+                      : 'bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border-white/10'
+                  }`}
                 >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Mark Class as Done</span>
+                  <Bookmark className={`w-3.5 h-3.5 ${isFavorited ? 'fill-amber-300' : ''}`} />
+                  <span>{isFavorited ? 'Saved' : 'Save'}</span>
                 </button>
-              )}
+
+                {!isAlreadyCompleted && (
+                  <button
+                    onClick={handleMarkComplete}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold rounded-xl shadow transition-all flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Mark Class as Done</span>
+                  </button>
+                )}
+              </div>
             </div>
 
           </div>

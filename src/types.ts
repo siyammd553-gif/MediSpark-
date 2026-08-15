@@ -497,8 +497,20 @@ export interface RecentlyViewedItem {
   viewedAt: string;
 }
 
+// A student's server-granted access to one course. Only the server
+// creates these records (free enroll, simulated purchase, or
+// admin/teacher assignment); the client can never self-grant access.
+export interface EnrollmentRecord {
+  courseId: string;
+  source: 'enrolled' | 'purchased' | 'assigned';
+  enrolledAt: string;
+  paymentMethod?: string;
+  amountPaid?: number;
+}
+
 export interface StudentDashboardData {
   enrolledCourseIds: string[];
+  enrollments?: EnrollmentRecord[];
   completedClassIds: string[];
   completedExamIds: Record<string, { bestScore: number; lastScore: number; attempts: number; timestamp: string }>;
   viewedPdfIds: string[];

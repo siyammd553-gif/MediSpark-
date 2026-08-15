@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Course } from '../types';
 import { useCourseImage } from '../utils/courseStorage';
+import { useLearning } from '../context/LearningContext';
 import { CoursePictureModal } from './CoursePictureModal';
 import {
   X,
@@ -41,6 +42,8 @@ const CourseDetailsModalInner: React.FC<{
   onEnroll: (course: Course) => void;
 }> = ({ course, onClose, onEnroll }) => {
   const { currentImage } = useCourseImage(course);
+  const { isCourseEnrolled } = useLearning();
+  const isEnrolled = isCourseEnrolled(course.id);
   const [isPictureModalOpen, setIsPictureModalOpen] = useState<boolean>(false);
 
   const isFreeCourse = course.isFree || (course.price === 0 && (!course.discountPrice || course.discountPrice === 0));
@@ -273,13 +276,15 @@ const CourseDetailsModalInner: React.FC<{
                   onEnroll(course);
                 }}
                 className={`px-5 py-2.5 ${
-                  isFreeCourse
+                  isEnrolled
                     ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_4px_16px_rgba(16,185,129,0.4)]'
-                    : 'bg-[#E50914] hover:bg-[#b8060f] text-white shadow-[0_4px_16px_rgba(229,9,20,0.4)]'
+                    : isFreeCourse
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_4px_16px_rgba(16,185,129,0.4)]'
+                      : 'bg-[#E50914] hover:bg-[#b8060f] text-white shadow-[0_4px_16px_rgba(229,9,20,0.4)]'
                 } text-xs sm:text-sm font-black rounded-xl transition-all flex items-center gap-1.5`}
               >
                 <Check className="w-4 h-4 stroke-[3]" />
-                <span>{isFreeCourse ? '✓ Enroll Free' : '✓ Enroll Now'}</span>
+                <span>{isEnrolled ? '✓ Enrolled' : isFreeCourse ? '✓ Enroll Free' : '✓ Enroll Now'}</span>
               </button>
             </div>
           </div>

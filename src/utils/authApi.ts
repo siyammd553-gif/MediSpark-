@@ -1,4 +1,4 @@
-import { StudentDashboardData } from '../types';
+import { EnrollmentRecord, StudentDashboardData } from '../types';
 
 export type UserRole = 'student' | 'teacher' | 'admin';
 
@@ -147,6 +147,23 @@ export const authApi = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
+
+  // Server-authoritative enrollment: free courses enroll instantly,
+  // paid courses record a simulated purchase with the payment method.
+  enrollInCourse: (payload: { courseId: string; paymentMethod?: string }) =>
+    request<{ enrollment: EnrollmentRecord; dashboard: StudentDashboardData; message: string }>(
+      '/api/student/enrollments',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    ),
+
+  removeEnrollment: (courseId: string) =>
+    request<{ ok: boolean; dashboard: StudentDashboardData }>(
+      `/api/student/enrollments/${encodeURIComponent(courseId)}`,
+      { method: 'DELETE' }
+    ),
 
   adminListUsers: () => request<{ total: number; users: AuthUser[] }>('/api/admin/users'),
 
